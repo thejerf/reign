@@ -7,7 +7,7 @@
     it is not intrinsically sensitive itself.
 * Each node needs `signing.crt` and its .key and .crt for itself.
   * DO NOT distribute `signing.key` to the nodes. Ideally, after creating
-    the node certs, remove `signing.crt` from the network entirely! This
+    the node certs, remove `signing.key` from the network entirely! This
     file is the key to the kingdom.
 * Take care of these files!
 * To know what magic these scripts are doing, read this file.
