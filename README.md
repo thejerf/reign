@@ -37,6 +37,10 @@ If this library sounds interesting to you, I would invite you to work with
 me on improving this code rather than starting again on your own. If you
 need help or more documentation, ask and ye shall receive.
 
+If you do not need exactly Erlang-style semantics, note there are other
+libraries out there that may be better starting points. But I don't know of
+anything else for Go explicitly written with this goal in mind.
+
 Security
 ========
 
