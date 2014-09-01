@@ -168,14 +168,11 @@ I really need to put together an example.
 I haven't yet benchmarked this. Very, VERY preliminary benchmarks indicates
 that it blows Erlang's local performance out of the water, which actually
 isn't all that surprising in a lot of ways as Erlang is also managing a lot
-of metadata that Go and REIGN do not. I've not yet done any testing of
+of metadata that Go and reign do not. I've not yet done any testing of
 clusters. Porting a simple message-based pong benchmark would be
 interesting, in both the local and cluster case. (I'm cautiously optimistic
-that Go and REIGN will continue to blow Erlang's performance out of the
+that Go and reign will continue to blow Erlang's performance out of the
 water, based on my initial experiences.)
-
-REIGN is currently inconsistently capitalized. As an acronym it really
-ought to be all-caps.
 
 Clustering doesn't yet work, which is a problem, but beyond that, the plan
 is that the cluster can be dynamically reconfigured at runtime by modifying

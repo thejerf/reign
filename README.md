@@ -1,11 +1,11 @@
-REIGN
+reign
 =====
 
 [![Build Status](https://travis-ci.org/thejerf/reign.png?branch=master)](https://travis-ci.org/thejerf/reign)
 
-REIGN, "Rewrite Erlang In Go Nicely", is designed to make it easy to port
-Erlang or Erlang-style programs into Go by providing a framework for
-Erlang-style message passing, _including the creation of clusters_.
+Reign, "Rewrite Erlang In Go Nicely", is designed to make it easy to port Erlang
+or Erlang-style programs into Go by providing a framework for Erlang-style
+message passing, _including the creation of clusters_.
 
 That is, this is not intended to be a "hey, look, if I wrap a mutex around
 a slice I get something that looks like a PID" four hours of screwing
@@ -44,7 +44,7 @@ anything else for Go explicitly written with this goal in mind.
 Security
 ========
 
-One note about REIGN is that I wanted to take the opportunity to fix the
+One note about reign is that I wanted to take the opportunity to fix the
 security of Erlang clustering by making all clustering run across SSL TCP
 connections. See the README.certificate.md for information about how to
 create the requisite certificates.
