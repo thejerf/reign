@@ -1,0 +1,28 @@
+#!/bin/sh
+
+KEYLENGTH=4096
+
+unalias rm 2>/dev/null
+
+if [ \! \( -e signing.key -a -e signing.crt \) ]; then
+    echo "Can't create node certificates with no signing cert; please run create_signing_cert"
+    exit 1
+fi
+
+if [ "$*" = "" ]; then
+    echo "Usage: $0 [node id 1] [node id 2] ..."
+    exit 0
+fi
+
+for node in $*; do
+    NODEBASE=node.${node}
+    if [ \! \( -e ${NODEBASE}.key -o -e ${NODEBASE}.crt \) \]; then
+        openssl req -newkey rsa:$KEYLENGTH -keyout ${NODEBASE}.key.enc -out ${NODEBASE}.req -subj "/C=GO/ST=reign/CN=${node}/" -passout pass:abcd && \
+        openssl rsa -in ${NODEBASE}.key.enc -out ${NODEBASE}.key -passin pass:abcd && \
+        rm -f ${NODEBASE}.key.enc && \
+        openssl x509 -req -days 3650 -in ${NODEBASE}.req -CA signing.crt -CAkey signing.key -out ${NODEBASE}.crt -CAcreateserial && \
+        rm -f ${NODEBASE}.req
+    else
+        echo "Error: Bypassing node $node because its files already exist."
+    fi
+done
