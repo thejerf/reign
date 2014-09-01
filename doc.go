@@ -17,6 +17,10 @@ It certainly does not give you automatic, trivial clustering or anything
 like that. You must still write a clusterable system, which is made much
 easier with these primitives, but still non-trivial.
 
+Or, at least, it WILL provide the latter. At the moment I believe the
+mailboxes have attained API stability, but the clustering is still
+in-progress.
+
 This package provides the former, though I call the PIDs "Address"es,
 because in Go they involve neither Processes nor IDentifiers. I don't
 bother with the latter, because in the modern day all that is necessary
@@ -52,7 +56,11 @@ implementations of some of this functionality.
 
 If you're using this to start a new Go project, you're probably doing it
 wrong. Probably. Honestly the more I think about this statement the less
-sure I am.
+sure I am. As I gain in experience using this library I find there are
+times you want an asynchronous message channel, and times you want
+a synchronous one, and while Go may make a good case that the synchronous
+case is the more sensible default that doesn't mean having an easy
+asynchronous primitive around isn't useful.
 
 Reign itself is the clustering and mailbox code, which turns out to be
 intimately related to each and require private access. For an
@@ -147,6 +155,15 @@ those "infinite regression" sorts of things. Do you have some nice wrapper
 around a "gen_server"-equivalent message passing paradigm? Is there some
 other specifically-Erlang module that is missing that you've implemented
 some support for? Please send pull requests.
+
+Known Issues
+
+In Erlang, a PID secretly contains more information that identifies
+something about when the node that originated the PID starts, or something
+like that, which prevents the "same" PID from being used from two different
+executions. This is easy to fix, but it isn't fixed yet.
+
+I really need to put together an example.
 
 */
 package reign
