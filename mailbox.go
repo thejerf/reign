@@ -15,11 +15,11 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
-	"reign/internal"
-
 	"strconv"
 	"sync"
 	"sync/atomic"
+
+	"github.com/thejerf/reign/internal"
 )
 
 const (

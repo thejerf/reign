@@ -62,7 +62,8 @@ away.
 import (
 	"errors"
 	"fmt"
-	"reign/internal"
+
+	"github.com/thejerf/reign/internal"
 )
 
 // ErrNoAddressRegistered is returned when there are no addresses at

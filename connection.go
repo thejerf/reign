@@ -2,9 +2,9 @@ package reign
 
 import (
 	"fmt"
-	"reign/internal"
 	"time"
 
+	"github.com/thejerf/reign/internal"
 	"github.com/thejerf/suture"
 )
 

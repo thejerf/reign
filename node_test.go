@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"reign/internal"
+	"github.com/thejerf/reign/internal"
 )
 
 // this goes ahead and just lets the nodes talk over the network

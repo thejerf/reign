@@ -38,8 +38,9 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"reign/internal"
 	"sync"
+
+	"github.com/thejerf/reign/internal"
 )
 
 const (

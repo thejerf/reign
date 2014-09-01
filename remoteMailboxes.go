@@ -3,8 +3,9 @@ package reign
 import (
 	"errors"
 	"fmt"
-	"reign/internal"
 	"sync"
+
+	"github.com/thejerf/reign/internal"
 )
 
 type messageSender interface {

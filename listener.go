@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"reign/internal"
 	"runtime"
 	"sync"
+
+	"github.com/thejerf/reign/internal"
 )
 
 // This file defines the listener, which listens for incoming node connections,
