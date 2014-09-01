@@ -36,3 +36,16 @@ number), and I will be responsive to requests.
 If this library sounds interesting to you, I would invite you to work with
 me on improving this code rather than starting again on your own. If you
 need help or more documentation, ask and ye shall receive.
+
+Security
+========
+
+One note about REIGN is that I wanted to take the opportunity to fix the
+security of Erlang clustering by making all clustering run across SSL TCP
+connections. See the README.certificate.md for information about how to
+create the requisite certificates.
+
+Preliminary benchmarking seems to indicate that the overhead of running
+everything through SSL is negligible, so an earlier feature allowing you to
+choose whether you use it has been eliminated since it added significant
+complexity and danger with no benefits.
