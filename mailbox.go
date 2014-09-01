@@ -142,6 +142,9 @@ type Address struct {
 	mailbox address
 }
 
+// GetID returns the AddressID associated with this Address.
+//
+// This is safe to use as keys for maps.
 func (a Address) GetID() AddressID {
 	return a.id
 }
@@ -152,7 +155,7 @@ func (a *Address) clearAddress() {
 	a.mailbox = nil
 }
 
-var rmIsAddress address = registryMailbox("")
+var rmIsAddress = registryMailbox("")
 
 func (a *Address) getAddress() address {
 	if a.mailbox != nil {
@@ -190,20 +193,20 @@ func (a *Address) getAddress() address {
 		if err == nil {
 			a.mailbox = mbox
 			return mbox
-		} else {
-			// since the above if clause forces addressByID down the
-			// same if branch in its implementation, the only possible
-			// error is ErrMailboxTerminated. While this is in some
-			// sense an error for the user, as far as marshaling is
-			// concerned, this is success, because it's perfectly legal to
-			// unmarshal an address corresponding to something that has
-			// since terminated, just as it's perfectly legal to hold on to
-			// a reference to a mailbox that has terminated. We do however
-			// short-circuit everything else about the mailbox by returning
-			// this "noMailbox" shim.
-			a.mailbox = noMailbox{mailboxID}
-			return a.mailbox
 		}
+
+		// since the above if clause forces addressByID down the
+		// same if branch in its implementation, the only possible
+		// error is ErrMailboxTerminated. While this is in some
+		// sense an error for the user, as far as marshaling is
+		// concerned, this is success, because it's perfectly legal to
+		// unmarshal an address corresponding to something that has
+		// since terminated, just as it's perfectly legal to hold on to
+		// a reference to a mailbox that has terminated. We do however
+		// short-circuit everything else about the mailbox by returning
+		// this "noMailbox" shim.
+		a.mailbox = noMailbox{mailboxID}
+		return a.mailbox
 	}
 
 	remoteMailboxes, exists := c.remoteMailboxes[mailboxID.NodeID()]
@@ -444,7 +447,7 @@ func (a Address) MarshalText() ([]byte, error) {
 		return []byte(fmt.Sprintf("\"%s\"", string(mbox))), nil
 
 	default:
-		return nil, errors.New("Unknown address type?!?! Internal reign error.")
+		return nil, errors.New("unknown address type, internal reign error")
 	}
 }
 

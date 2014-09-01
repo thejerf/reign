@@ -1,6 +1,7 @@
 #!/bin/bash
 
-GOLINTOUT=$(golint *go)
+# The tests use underscores in some variable names... golint false-flags them.
+GOLINTOUT=$(golint *go | grep -v underscores)
 
 if [ ! -z "$GOLINTOUT" -o "$?" != 0 ]; then
     echo golint failed:

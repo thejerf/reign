@@ -16,7 +16,7 @@ func jsonbytes(b []byte) string {
 func TestJSONSpecification(t *testing.T) {
 	defer nilConnections()
 
-	validJson := []byte(`
+	validJSON := []byte(`
 {
     "nodes": {
         "0": {
@@ -31,7 +31,7 @@ func TestJSONSpecification(t *testing.T) {
     "node_key_pem": "` + jsonbytes(node1_1_key) + `",
     "cluster_cert_pem": "` + jsonbytes(signing1_cert) + `"
 }`)
-	cluster, err := createFromJSON(validJson, 0, NullLogger)
+	cluster, err := createFromJSON(validJSON, 0, NullLogger)
 	cluster.Terminate()
 	if err != nil {
 		t.Fatal("Got error constructing valid cluster:", err)
@@ -43,7 +43,7 @@ func TestJSONSpecification(t *testing.T) {
 
 	nilConnections()
 	// Test the alternative creation methods
-	specFile, cleanup := tmpFile("spec_tmp_file", validJson)
+	specFile, cleanup := tmpFile("spec_tmp_file", validJSON)
 	defer cleanup()
 
 	// Can we create from a good spec file?
@@ -71,7 +71,7 @@ func TestJSONSpecification(t *testing.T) {
 	nilConnections()
 
 	// and does that fail properly?
-	badReader := FakeReader{errors.New("I'm a wacky error!")}
+	badReader := FakeReader{errors.New("a wacky error")}
 	service, err = createFromReader(badReader, 0, NullLogger)
 	if err == nil || connections != nil {
 		t.Fatal("bad reader still somehow yielded a cluster")
@@ -85,7 +85,7 @@ func TestJSONSpecification(t *testing.T) {
 
 	// can we just make up our own specification?
 	legalSpec := &ClusterSpec{}
-	err = json.Unmarshal(validJson, legalSpec)
+	err = json.Unmarshal(validJSON, legalSpec)
 	if err != nil {
 		t.Fatal("Unexpected marshaling problem")
 	}

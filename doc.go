@@ -1,6 +1,6 @@
 /*
 
-Package cluster implements the Erlang-like clustering support.
+Package reign implements the Erlang-like clustering support.
 
 What Erlang Clustering Is
 

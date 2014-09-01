@@ -61,6 +61,9 @@ var cipherToID = map[string]uint16{
 	"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": 0xc02b,
 }
 
+// NodeID is used to identify the current node's ID.
+//
+// This type may be privitized in later versions of reign.
 type NodeID byte
 
 // A NodeDefinition gives information about the node in question.
@@ -200,7 +203,7 @@ func noClustering(log ClusterLogger) *connectionServer {
 	return connectionServer
 }
 
-// Create is the most automated way of creating a cluster, using the
+// CreateFromSpecFile is the most automated way of creating a cluster, using the
 // command-line parameter "clusterspec" to specify the location of the
 // cluster specification .json file, and creating a cluster from there.
 //
@@ -434,7 +437,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	cluster.hash = hash.Sum64()
 
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("The following errors occurred in the cluster's specification:\n * %s\n",
+		return nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s\n",
 			strings.Join(errs, "\n * "),
 		)
 	}

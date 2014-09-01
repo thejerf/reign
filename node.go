@@ -146,24 +146,24 @@ func (nc *nodeConnector) Stop() {
 	}
 }
 
-func (nd *nodeConnection) terminate() {
-	if nd == nil {
+func (nc *nodeConnection) terminate() {
+	if nc == nil {
 		return
 	}
 
-	tls := nd.tls
+	tls := nc.tls
 	if tls != nil {
 		tls.Close()
 	}
-	conn := nd.conn
+	conn := nc.conn
 	if conn != nil {
 		conn.Close()
 	}
-	rawOutput := nd.rawOutput
+	rawOutput := nc.rawOutput
 	if rawOutput != nil {
 		rawOutput.Close()
 	}
-	rawInput := nd.rawInput
+	rawInput := nc.rawInput
 	if rawInput != nil {
 		rawInput.Close()
 	}
@@ -199,7 +199,7 @@ func (nc *nodeConnection) sslHandshake() error {
 	if nc.failOnSSLHandshake {
 		nc.conn.Close()
 		nc.Trace("Failing on ssl handshake, as instructed")
-		return errors.New("Failing on ssl handshake, as instructed.")
+		return errors.New("failing on ssl handshake, as instructed")
 	}
 	tlsConfig := nc.connectionServer.Cluster.tlsConfig(nc.dest.ID)
 	tlsConn := tls.Client(nc.conn, tlsConfig)
@@ -226,7 +226,7 @@ func (nc *nodeConnection) clusterHandshake() error {
 	if nc.failOnClusterHandshake {
 		nc.tls.Close()
 		nc.Trace("Failing on cluster handshake, as instructed")
-		return errors.New("Failing on cluster handshake, as instructed")
+		return errors.New("failing on cluster handshake, as instructed")
 	}
 	handshake := internal.ClusterHandshake{
 		ClusterVersion: clusterVersion,
