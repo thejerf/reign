@@ -14,6 +14,10 @@ replacement for Erlang-style message passing functionality, suitable for
 porting existing Erlang programs out of Erlang without significant
 architecture overhauls.
 
+PLEASE DO NOT SUBMIT TO REDDIT, HACKER NEWS, ETC... while I'd like to put
+this on there eventually, first I'd like the examples, coverage, working
+clustering, etc.
+
 That said, it is not there yet. The local message passing functionality is,
 I believe, correct and API-stable, but the clustering is still in progress.
 
