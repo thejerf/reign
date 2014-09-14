@@ -79,6 +79,14 @@ type connectionServer struct {
 	*Cluster
 }
 
+func (cs *connectionServer) getNodes() []NodeID {
+	nodes := []NodeID{}
+	for nodeID := range cs.nodeConnectors {
+		nodes = append(nodes, nodeID)
+	}
+	return nodes
+}
+
 // this is a function that allows tests to wait for a cluster connection
 // to be established to the target node before continuing on.
 func (cs *connectionServer) waitForConnection(node NodeID) {

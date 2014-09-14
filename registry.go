@@ -139,21 +139,29 @@ type removeNotifyOnTerminateRegistryAddr struct {
 	addr    Address
 }
 
+// This abstracts out the connectionServer for the registry, allowing it to
+// be tested without setting up a full massive cluster.
+type registryServer interface {
+	getNodes() []NodeID
+	newLocalMailbox() (Address, *Mailbox)
+	AddConnectionStatusCallback(f func(NodeID, bool))
+}
+
 // conceptually, I consider this inline with the newConnections function,
 // since this deeply depends on the order of parameters initialized in the
 // &connectionServer{} in an otherwise icky way...
-func newRegistry(server *connectionServer, node NodeID) *registry {
+func newRegistry(server registryServer, node NodeID) *registry {
 	r := &registry{
 		claims:     make(map[string]map[AddressID]voidtype),
 		nodeClaims: make(map[NodeID]map[string]mailboxID),
 		thisNode:   node,
 	}
 
-	for node := range server.nodeConnectors {
+	for _, node := range server.getNodes() {
 		r.nodeClaims[node] = make(map[string]mailboxID)
 	}
 
-	r.Address, r.Mailbox = server.mailboxes.newLocalMailbox()
+	r.Address, r.Mailbox = server.newLocalMailbox()
 
 	server.AddConnectionStatusCallback(r.connectionStatusCallback)
 
