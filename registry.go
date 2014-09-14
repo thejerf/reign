@@ -27,12 +27,13 @@ What? Chaos! Madness! Insanity! ... actually, in a lot of these distributed
 systems, not so much. Erlang-style message passing already only promises
 a best-effort delivery standing between 0 and 1 copies of the message
 delivered; it isn't that much more crazy to then say that if you invoke
-certain functionality you may also get N deliveries. Furthermore, this
-service is often used for external service providers which are connecting
-to provide some service, and that connection itself enforces that only
-one Address in the world at a time is a valid way of reaching it (if
-any), so sending a message "more than once" will still result only in
-one reply (or zero) coming back.
+certain functionality you may also get N deliveries. One example of
+how this doesn't matter is if you have a service being provided by
+an external resource that connects into the cluster and registers itself
+by some name, reconnecting when it is disconnected; if the remote service
+itself never has more than one simultaneous connection open, then the
+remote service is implementing the constraint that there can not possibly
+be more than one correct address.
 
 In return, what you get is Total Partitionability. Unlike many other
 systems that fail if a certain number of nodes drop out of the cluster,
@@ -50,12 +51,12 @@ that is up to you....
 As a final note, when the notification of a claim of an Address that
 something local also believes is claimed comes in, a notification to
 the local claimant will be sent telling them that there is a conflicting
-claim, including all claimants to the name. In my case, since I do
-indeed have services registering themselves with a service socket,
-I just kill whatever socket I think I have in response to such a claim.
-If the local service is the "real" service, it'll issue another claim
-again on that name; if it is fake, then my local registration just goes
-away.
+claim, including all claimants the local node believes to exist. In my
+case, since I do indeed have services registering themselves with a
+service socket, I just kill whatever socket I think I have in response to
+such a claim. If the local service is the "real" service, it'll issue
+another claim again on that name; if it is fake, then my local registration
+just goes away.
 
 */
 
