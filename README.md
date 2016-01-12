@@ -14,6 +14,12 @@ replacement for Erlang-style message passing functionality, suitable for
 porting existing Erlang programs out of Erlang without significant
 architecture overhauls.
 
+Status update, Jan 12 2016: This is not dead, it's just that as described
+below there's not much point sharing it until it is working enough to
+contribute to it. Currently the coworker I have working on this is hoping
+to get it to release quality before Gophercon in July. Work is continuing.
+Scope has even grown a bit.
+
 That said, it is not there yet. The local message passing functionality is,
 I believe, correct and API-stable, but the clustering is still in progress.
 
