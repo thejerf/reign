@@ -138,6 +138,7 @@ func TestMailboxReceive(t *testing.T) {
 	matches <- matchC
 	// must permit one use of the match function per searched item
 	<-matching
+	// should find C on this match
 	<-matching
 	msg := <-msgs
 
@@ -160,13 +161,16 @@ func TestMailboxReceive(t *testing.T) {
 		waitingDone <- true
 	}()
 
-	// will run two matches against what is already there, then wait
+	// will run two matches against what is already there (b, d), then wait
 	<-matching
 	<-matching
+	// Receive() will be at m.cond.Wait() at this point, allowing us to lock
+	// the mutex and send d.
 	a.Send(d)
+	// Pick up reading from where we left off.  We won't match on d.
 	<-matching
-	// will run another match, which will fail
 	a.Send(c)
+	// We will match on c we just sent.
 	<-matching
 	<-waitingDone
 
@@ -174,13 +178,20 @@ func TestMailboxReceive(t *testing.T) {
 		t.Fatal("Did not properly fix up the message queue")
 	}
 
-	matches <- matchStop
+	// Send the Stop message before sending matchStop.  Otherwise, we deadlock with Receive()
+	// holding the mutex, Send() attempting to acquire the mutex, and matchStop blocking on
+	// its write to the matching channel.
+	//
+	// Alternatively, we could send matchStop, read from matching 3 times to progress Receive()
+	// to m.cond.Wait().  This would release the mutex so Send() can acquire it and deliver the
+	// Stop message.  The subsequent read from matching will successfully match on the Stop message.
 	a.Send(Stop{})
-	// match against the three messages in the queue, then successfully
-	// match the Stop we just put on...
+	matches <- matchStop
+	// match against the three messages in the queue
 	<-matching
 	<-matching
 	<-matching
+	// then successfully match the Stop we put on...
 	<-matching
 	// at which point we're done.
 	<-done
