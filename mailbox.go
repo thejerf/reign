@@ -578,7 +578,7 @@ func (m *mailboxes) newLocalMailbox() (Address, *Mailbox) {
 	cond := sync.NewCond(&mutex)
 
 	nextID := mailboxID(atomic.AddUint64((*uint64)(&m.nextMailboxID), 1))
-	m.nextMailboxID += 1
+	m.nextMailboxID++
 	id := nextID<<8 + mailboxID(m.nodeID)
 
 	mailbox := &Mailbox{
@@ -716,9 +716,9 @@ func (m *Mailbox) ReceiveNext() interface{} {
 // regardless of the behavior of the matcher.
 func (m *Mailbox) Receive(matcher func(interface{}) bool) interface{} {
 	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
 
 	if m.terminated {
-		m.cond.L.Unlock()
 		return MailboxTerminated(m.id)
 	}
 
@@ -726,7 +726,6 @@ func (m *Mailbox) Receive(matcher func(interface{}) bool) interface{} {
 	for i, v := range m.messages {
 		if matcher(v.msg) {
 			m.messages = append(m.messages[:i], m.messages[i+1:]...)
-			m.cond.L.Unlock()
 			return v.msg
 		}
 	}
@@ -743,7 +742,6 @@ func (m *Mailbox) Receive(matcher func(interface{}) bool) interface{} {
 		}
 
 		if m.terminated {
-			m.cond.L.Unlock()
 			return MailboxTerminated(m.id)
 		}
 
@@ -751,7 +749,6 @@ func (m *Mailbox) Receive(matcher func(interface{}) bool) interface{} {
 			if matcher(m.messages[lastIdx].msg) {
 				match := m.messages[lastIdx].msg
 				m.messages = append(m.messages[:lastIdx], m.messages[lastIdx+1:]...)
-				m.cond.L.Unlock()
 				return match
 			}
 		}
