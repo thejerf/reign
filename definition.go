@@ -50,6 +50,8 @@ var cipherToID = map[string]uint16{
 	"TLS_RSA_WITH_3DES_EDE_CBC_SHA":           0x000a,
 	"TLS_RSA_WITH_AES_128_CBC_SHA":            0x002f,
 	"TLS_RSA_WITH_AES_256_CBC_SHA":            0x0035,
+	"TLS_RSA_WITH_AES_128_GCM_SHA256":         0x009c,
+	"TLS_RSA_WITH_AES_256_GCM_SHA384":         0x009d,
 	"TLS_ECDHE_ECDSA_WITH_RC4_128_SHA":        0xc007,
 	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":    0xc009,
 	"TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":    0xc00a,
@@ -59,6 +61,8 @@ var cipherToID = map[string]uint16{
 	"TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":      0xc014,
 	"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":   0xc02f,
 	"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": 0xc02b,
+	"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":   0xc030,
+	"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384": 0xc02c,
 }
 
 // NodeID is used to identify the current node's ID.
