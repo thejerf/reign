@@ -12,6 +12,8 @@ func (nw nullWriter) Write(p []byte) (n int, err error) {
 }
 
 func TestWrapLoggerCoverage(t *testing.T) {
+	t.Parallel()
+
 	// mostly this tests that it doesn't crash...
 	wl := WrapLogger(log.New(nullWriter{}, "", 0))
 	wl.Trace("Hi!")
@@ -21,9 +23,13 @@ func TestWrapLoggerCoverage(t *testing.T) {
 }
 
 func TestStdLoggerCoverage(t *testing.T) {
+	t.Parallel()
+
 	stdLogger{}.Warn("Testing warn coverage")
 }
 
 func TestNullLoggerCoverage(t *testing.T) {
+	t.Parallel()
+
 	NullLogger.Warn("Test null warn coverage")
 }

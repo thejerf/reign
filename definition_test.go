@@ -104,6 +104,8 @@ func TestJSONSpecification(t *testing.T) {
 
 // to see if this catches all errors, examine the coverage graph
 func TestJSONSpecErrors(t *testing.T) {
+	t.Parallel()
+
 	defer nilConnections()
 
 	noNodes := []byte(`{}`)
@@ -200,6 +202,8 @@ func TestCoverNoClustering(t *testing.T) {
 }
 
 func TestResolveLog(t *testing.T) {
+	t.Parallel()
+
 	if resolveLog(nil) != StdLogger {
 		t.Fatal("Don't get StdLogger for nil")
 	}
