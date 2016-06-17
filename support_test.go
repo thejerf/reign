@@ -69,20 +69,6 @@ func (ntb *NetworkTestBed) terminate() {
 	ntb.terminateMailboxes()
 }
 
-func (ntb *NetworkTestBed) with1(f func()) {
-	connectionsL.Lock()
-	defer connectionsL.Unlock()
-	connections = ntb.c1
-	f()
-}
-
-func (ntb *NetworkTestBed) with2(f func()) {
-	connectionsL.Lock()
-	defer connectionsL.Unlock()
-	connections = ntb.c2
-	f()
-}
-
 func testSpec() *ClusterSpec {
 	return &ClusterSpec{
 		Nodes: map[string]*NodeDefinition{
@@ -108,31 +94,26 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 
 	spec.NodeKeyPEM = string(node2_1_key)
 	spec.NodeCertPEM = string(node2_1_cert)
-	nilConnections()
-	ntb.c2, err = createFromSpec(spec, 2, NullLogger)
+	ntb.c2, _, err = createFromSpec(spec, 2, NullLogger)
 	if err != nil {
 		panic(err)
 	}
-	nilConnections()
 
 	spec.NodeKeyPEM = string(node1_1_key)
 	spec.NodeCertPEM = string(node1_1_cert)
-	ntb.c1, err = createFromSpec(spec, 1, NullLogger)
+	ntb.c1, _, err = createFromSpec(spec, 1, NullLogger)
 	if err != nil {
 		panic(err)
 	}
 
-	setConnections(ntb.c1)
-	ntb.addr1_1, ntb.mailbox1_1 = New()
+	ntb.addr1_1, ntb.mailbox1_1 = ntb.c1.NewMailbox()
 	ntb.addr1_1.connectionServer = ntb.c1
-	ntb.addr2_1, ntb.mailbox2_1 = New()
+	ntb.addr2_1, ntb.mailbox2_1 = ntb.c1.NewMailbox()
 	ntb.addr2_1.connectionServer = ntb.c1
 
-	setConnections(ntb.c2)
-	connections = ntb.c2
-	ntb.addr1_2, ntb.mailbox1_2 = New()
+	ntb.addr1_2, ntb.mailbox1_2 = ntb.c2.NewMailbox()
 	ntb.addr1_2.connectionServer = ntb.c2
-	ntb.addr2_2, ntb.mailbox2_2 = New()
+	ntb.addr2_2, ntb.mailbox2_2 = ntb.c2.NewMailbox()
 	ntb.addr2_2.connectionServer = ntb.c2
 
 	ntb.rem1_2 = Address{ntb.addr1_2.id, ntb.c1, nil}
@@ -143,8 +124,6 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 
 	ntb.remote1to2 = ntb.c1.remoteMailboxes[2]
 	ntb.remote2to1 = ntb.c2.remoteMailboxes[1]
-
-	nilConnections()
 
 	return ntb
 }
@@ -175,8 +154,4 @@ func panics(f func()) (panics bool) {
 	f()
 
 	return
-}
-
-func nilConnections() {
-	setConnections(nil)
 }

@@ -16,25 +16,14 @@ var anything = func(i interface{}) bool {
 	return true
 }
 
-func unsetConnections(t *testing.T) {
-	connections.Terminate()
-	if connections.mailboxes.mailboxCount() != 0 {
-		t.Fatal("Failed to correctly clean up all mailboxes at test termination. Had:", connections.mailboxes.mailboxCount())
-	}
-
-	nilConnections()
-}
-
 func TestRegisterTypeCoverage(t *testing.T) {
 	RegisterType(t)
 }
 
 func TestMailboxReceiveNext(t *testing.T) {
-	nilConnections()
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
-	a, m := New()
+	a, m := connections.NewMailbox()
 	defer m.Terminate()
 
 	msgs := make(chan interface{})
@@ -82,11 +71,9 @@ func TestMailboxReceiveNext(t *testing.T) {
 }
 
 func TestMailboxReceive(t *testing.T) {
-	nilConnections()
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
-	a, m := New()
+	a, m := connections.NewMailbox()
 	defer m.Terminate()
 
 	msgs := make(chan interface{})
@@ -198,12 +185,10 @@ func TestMailboxReceive(t *testing.T) {
 }
 
 func TestBasicTerminate(t *testing.T) {
-	nilConnections()
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
-	addr1, mailbox1 := New()
-	addr2, mailbox2 := New()
+	addr1, mailbox1 := connections.NewMailbox()
+	addr2, mailbox2 := connections.NewMailbox()
 	defer mailbox2.Terminate()
 
 	addr1.NotifyAddressOnTerminate(addr2)
@@ -233,7 +218,7 @@ func TestBasicTerminate(t *testing.T) {
 		t.Fatal("ReceiveNext from a terminated mailbox does not return MailboxTerminated properly")
 	}
 
-	addr1S, mailbox1S := New()
+	addr1S, mailbox1S := connections.NewMailbox()
 	mailbox1S.Terminate()
 	terminatedResult = mailbox1S.Receive(anything)
 	if terminatedResult.(MailboxTerminated).(mailboxID) != addr1S.GetID() {
@@ -243,8 +228,7 @@ func TestBasicTerminate(t *testing.T) {
 }
 
 func TestAsyncTerminateOnReceive(t *testing.T) {
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
 	wantHello := func(i interface{}) bool {
 		iReal, isStr := i.(string)
@@ -254,7 +238,7 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 		return iReal == "Hello"
 	}
 
-	addr1, mailbox1 := New()
+	addr1, mailbox1 := connections.NewMailbox()
 
 	// This goroutine uses private variables watches to see when the first
 	// message has been sent. The Receive call is not looking for this message,
@@ -295,10 +279,9 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 }
 
 func TestAsyncTerminateOnReceiveNext(t *testing.T) {
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
-	addr1, mailbox1 := New()
+	addr1, mailbox1 := connections.NewMailbox()
 
 	// Similar to the previous test, except simpler
 	go func() {
@@ -326,11 +309,10 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 }
 
 func TestRemoveOfNotifications(t *testing.T) {
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
-	addr, mailbox1 := New()
-	addr2, mailbox2 := New()
+	addr, mailbox1 := connections.NewMailbox()
+	addr2, mailbox2 := connections.NewMailbox()
 
 	// no crashing
 	addr.RemoveNotifyAddress(addr2)
@@ -346,15 +328,15 @@ func TestRemoveOfNotifications(t *testing.T) {
 }
 
 func TestSendByID(t *testing.T) {
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
-	_, mailbox := New()
+	_, mailbox := connections.NewMailbox()
 	defer mailbox.Terminate()
 
-	// Verify that creating a new address with the same ID works
+	// Verify that creating a new address with the same ID and connectionServer works
 	var addr Address
 	addr.id = mailbox.id
+	addr.connectionServer = mailbox.parent.connectionServer
 	err := addr.Send("Hello")
 
 	msg := mailbox.ReceiveNext()
@@ -366,6 +348,7 @@ func TestSendByID(t *testing.T) {
 
 	addr = Address{}
 	addr.id = mailboxID(256) + mailboxID(connections.ThisNode.ID)
+	addr.connectionServer = mailbox.parent.connectionServer
 	err = addr.Send("Hello")
 	if err != ErrMailboxTerminated {
 		t.Fatal("sendByID happily sent to a terminated mailbox")
@@ -386,12 +369,26 @@ func getMarshalsAndTest(a address) ([]byte, []byte, string) {
 
 	s := addr.String()
 
+	// If unmarshalling doesn't go through handleIncomingConnections, no connectionServer will
+	// be put into the Address or its internal registryMailbox. So we only compare the names
 	var addrBin Address
 	err = addrBin.UnmarshalBinary(bin)
 	if err != nil {
 		panic("Could not unmarshal the marshaled bin: " + string(bin))
 	}
-	if addrBin.GetID() != addr.GetID() {
+	binID := addrBin.GetID()
+	binFailed := false
+	switch binID.(type) {
+	case mailboxID:
+		if binID != addr.GetID() {
+			binFailed = true
+		}
+	case registryMailbox:
+		if binID.(registryMailbox).name != addr.GetID().(registryMailbox).name {
+			binFailed = true
+		}
+	}
+	if binFailed {
 		panic("After unmarshaling the bin, ids are not ==")
 	}
 
@@ -400,7 +397,19 @@ func getMarshalsAndTest(a address) ([]byte, []byte, string) {
 	if err != nil {
 		panic("could not unmarshal the text")
 	}
-	if addrText.GetID() != addr.GetID() {
+	textID := addrText.GetID()
+	textFailed := false
+	switch textID.(type) {
+	case mailboxID:
+		if textID != addr.GetID() {
+			textFailed = true
+		}
+	case registryMailbox:
+		if textID.(registryMailbox).name != addr.GetID().(registryMailbox).name {
+			textFailed = true
+		}
+	}
+	if textFailed {
 		fmt.Printf("%#v %#v %#v\n", bin, addrText.GetID(), addr.GetID())
 		panic(fmt.Sprintf("After unmarshalling the text, ids are not ==: %#v %#v", addrText.GetID(), addr.GetID()))
 	}
@@ -409,8 +418,7 @@ func getMarshalsAndTest(a address) ([]byte, []byte, string) {
 }
 
 func TestMarshaling(t *testing.T) {
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
 
 	mID := mailboxID(257)
 	connections.ThisNode.ID = mID.NodeID()
@@ -449,7 +457,7 @@ func TestMarshaling(t *testing.T) {
 		t.Fatal("noMailbox did not String as expected")
 	}
 
-	bin, text, s = getMarshalsAndTest(registryMailbox("A"))
+	bin, text, s = getMarshalsAndTest(registryMailbox{"A", connections})
 	if !reflect.DeepEqual(bin, []byte("\"A")) {
 		t.Fatal("registryMailbox did not binary marshal as expected")
 	}
@@ -462,9 +470,6 @@ func TestMarshaling(t *testing.T) {
 }
 
 func TestUnmarshalAddressErrors(t *testing.T) {
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
-
 	a := &Address{}
 
 	err := a.UnmarshalBinary([]byte{})
@@ -515,21 +520,13 @@ func TestCoverNoMailbox(t *testing.T) {
 	// FIXME: Test marshal/unmarshal
 }
 
-func TestCoverNoConnections(t *testing.T) {
-	nilConnections()
-
-	if !panics(func() { New() }) {
-		t.Fatal("Mailboxes can be created without connections")
-	}
-}
-
 func TestCoverCanBeRegistered(t *testing.T) {
 	mID := mailboxID(1)
 	if !mID.canBeGloballyRegistered() {
 		t.Fatal("Can't register mailboxIDs globally")
 	}
 
-	rm := registryMailbox("")
+	rm := registryMailbox{"", nil}
 	if rm.canBeGloballyRegistered() {
 		t.Fatal("Can globally register registry mailboxes")
 	}
@@ -547,11 +544,12 @@ func TestCoverCanBeRegistered(t *testing.T) {
 
 // Cover the errors not tested by anything else
 func TestCoverAddressMarshaling(t *testing.T) {
+	//connections, _ := noClustering(NullLogger)
 	var a Address
 
 	b, err := a.MarshalBinary()
 	if b != nil || err != ErrIllegalAddressFormat {
-		t.Fatal("Wrong error from marshaling binary of empty address")
+		t.Fatal("Wrong error from marshaling binary of empty address #%v, #%v", b, err)
 	}
 
 	a.clearAddress()
@@ -561,19 +559,18 @@ func TestCoverAddressMarshaling(t *testing.T) {
 	}
 
 	a.clearAddress()
-	a.id = registryMailbox("hello")
-	if a.getAddress() != registryMailbox("hello") {
+	rm := registryMailbox{"hello", a.connectionServer}
+	a.id = rm
+	if a.getAddress() != rm {
 		t.Fatal("Can't unmarshal an Address from a registryMailbox")
 	}
 
-	nilConnections()
-	setConnections(noClustering(NullLogger))
-	defer unsetConnections(t)
+	connections, _ := noClustering(NullLogger)
+	a, m := connections.NewMailbox()
 
-	a, m := New()
 	defer m.Terminate()
 
-	var a2 Address
+	a2, _ := connections.NewMailbox()
 	a2.UnmarshalFromID(a.GetID())
 	a2.Send("test")
 

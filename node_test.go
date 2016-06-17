@@ -93,16 +93,8 @@ func TestCoverage(t *testing.T) {
 		t.Fatal("Didn't panic with bad newConnections: no clusterlogger")
 	}
 
-	// set a null cluster so that we've already declared one, then test
-	// that we can't declare another.
-	NoClustering()
-	if !panics(func() { createFromSpec(testSpec(), 10, NullLogger) }) {
-		t.Fatal("createFromSpec does not object to double-creating connections")
-	}
-
 	var err error
-	nilConnections()
-	_, err = createFromSpec(testSpec(), 10, NullLogger)
+	_, _, err = createFromSpec(testSpec(), 10, NullLogger)
 	if err.Error() != "the node claimed to be the local node is not defined" {
 		t.Fatal("Failed to verify the claimed local node is in the cluster")
 	}

@@ -245,15 +245,16 @@ func (nc *nodeConnection) clusterHandshake() error {
 
 	myNodeID := NodeID(serverHandshake.MyNodeID)
 	yourNodeID := NodeID(serverHandshake.YourNodeID)
+	cs := nc.connectionServer
 
 	if serverHandshake.ClusterVersion != clusterVersion {
-		connections.Warn("Remote node id %v claimed unknown cluster version %v, proceeding in the hope that this will all just work out somehow...", nc.dest.ID, serverHandshake.ClusterVersion)
+		cs.Warn("Remote node id %v claimed unknown cluster version %v, proceeding in the hope that this will all just work out somehow...", nc.dest.ID, serverHandshake.ClusterVersion)
 	}
 	if myNodeID != nc.dest.ID {
-		connections.Warn("The node I thought was #%v is claiming to be #%v instead. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly....", nc.dest.ID, serverHandshake.MyNodeID)
+		cs.Warn("The node I thought was #%v is claiming to be #%v instead. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly....", nc.dest.ID, serverHandshake.MyNodeID)
 	}
 	if yourNodeID != nc.source.ID {
-		connections.Warn("The node #%v thinks I'm node #%v, but I think I'm node #%v. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly...", nc.dest.ID, serverHandshake.YourNodeID, nc.source.ID)
+		cs.Warn("The node #%v thinks I'm node #%v, but I think I'm node #%v. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly...", nc.dest.ID, serverHandshake.YourNodeID, nc.source.ID)
 	}
 
 	nc.input = gob.NewDecoder(nc.tls)

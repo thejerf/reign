@@ -122,7 +122,10 @@ type connectionStatus struct {
 // state... that is, at the time you "send" a message, it uses the
 // registry's current information about that name to determine what to
 // do. It is, therefore, dynamic.
-type registryMailbox string
+type registryMailbox struct {
+	name             string
+	connectionServer *connectionServer
+}
 
 type sendRegistryMessage struct {
 	mailbox registryMailbox
@@ -145,6 +148,52 @@ type registryServer interface {
 	getNodes() []NodeID
 	newLocalMailbox() (Address, *Mailbox)
 	AddConnectionStatusCallback(f func(NodeID, bool))
+}
+
+// Names exposes some functionality of registry
+//
+// Lookup looks up a given name and returns a mailbox that can be used to
+// send messages and request termination notifications.
+//
+// Be sure to consult the documentation about the Registry in the
+// documentation section above; use of this address could in some
+// circumstances result in the message being delivered to more than one
+// Mailbox.
+//
+// In particular, this function does no checking as to whether the address
+// exists, as that information is intrinsically racy anyhow. If you want to
+// take extra care about it, use NotifyAddressOnTerminate, just as with
+// local addresses.
+//
+// Register claims the given global name in the registry. It can then be
+// accessed and manipulated via Lookup.
+//
+// This does not happen synchronously, as there seems to be no reason
+// for the caller to synchronously wait for this.
+//
+// A registered mailbox should stand ready to receive MultipleClaim
+// messages from the cluster.
+//
+// The passed-in Address must be something that directly came from a New()
+// call. Addressed obtained from the network or from Lookup itself will
+// return an error instead of registering.
+//
+//
+// Unregister removes the given claim from a given global name.
+// Unregistration will only occur if the current registrant matches the
+// address passed in. It is not an error for it not to match; the call will
+// simply be ignored.
+//
+// On a given node, only one Address can have a claim on a
+// name. If you wish to supercede a claim with a new address, you can
+// simply register the new claim, and it will overwrite the previous one.
+//
+// If the address passed in is not the current registrant, the call is
+// ignored, thus it is safe to call this.
+type Names interface {
+	Lookup(string) Address
+	Register(string, Address) error
+	Unregister(string, Address)
 }
 
 // conceptually, I consider this inline with the newConnections function,
@@ -188,7 +237,7 @@ func (r *registry) Serve() {
 			fmt.Println(msg)
 
 		case notifyOnTerminateRegistryAddr:
-			names, haveNames := r.claims[string(msg.mailbox)]
+			names, haveNames := r.claims[msg.mailbox.name]
 			if !haveNames || len(names) == 0 {
 				msg.addr.Send(MailboxTerminated(msg.mailbox))
 			}
@@ -200,7 +249,7 @@ func (r *registry) Serve() {
 			}
 
 		case removeNotifyOnTerminateRegistryAddr:
-			names, haveNames := r.claims[string(msg.mailbox)]
+			names, haveNames := r.claims[msg.mailbox.name]
 			if !haveNames {
 				return
 			}
@@ -252,7 +301,10 @@ func (r *registry) registerNodeRegistryMailbox(node NodeID, addr Address) {
 
 	// send initial synchronization
 	claims := map[string]internal.IntMailboxID{}
-	anc := internal.AllNodeClaims{internal.IntNodeID(r.thisNode), claims}
+	anc := internal.AllNodeClaims{
+		Node:   internal.IntNodeID(r.thisNode),
+		Claims: claims,
+	}
 
 	// Copy the claims. This has to be a fresh copy to make sure we don't
 	// lose anything to race conditions. If this becomes a performance
@@ -293,20 +345,14 @@ func (r *registry) toOtherNodes(msg interface{}) {
 	}
 }
 
-// Lookup returns an Address that can be used to send to the mailboxes
-// registered with the given string.
-//
 func (r *registry) Lookup(s string) Address {
-	return Address{registryMailbox(s), nil, nil}
+	rm := registryMailbox{
+		name:             s,
+		connectionServer: r.Address.connectionServer,
+	}
+	return Address{rm, nil, nil}
 }
 
-// Register claims the given global name in the registry.
-//
-// This does not happen synchronously, as there seems to be no reason
-// for the caller to synchronously wait for this.
-//
-// A registered mailbox should stand ready to receive MultipleClaim
-// messages from the cluster.
 func (r *registry) Register(name string, addr Address) error {
 	if !addr.GetID().canBeGloballyRegistered() {
 		return ErrCantGloballyRegister
@@ -314,21 +360,13 @@ func (r *registry) Register(name string, addr Address) error {
 
 	// only mailboxID can pass the canBeGloballyRegistered test above
 	r.Send(internal.RegisterName{
-		internal.IntNodeID(r.thisNode),
-		name,
-		internal.IntMailboxID(addr.GetID().(mailboxID)),
+		Node:      internal.IntNodeID(r.thisNode),
+		Name:      name,
+		AddressID: internal.IntMailboxID(addr.GetID().(mailboxID)),
 	})
 	return nil
 }
 
-// Unregister removes the given claim from a given global name.
-// Unregistration will only occur if the current registrant matches the
-// address passed in. It is not an error for it not to match; the call will
-// simply be ignored.
-//
-// On a given node, only one Address can have a claim on a
-// name. If you wish to supercede a claim with a new address, you can
-// simply register the new claim, and it will overwrite the previous one.
 func (r *registry) Unregister(name string, addr Address) {
 	if !addr.GetID().canBeGloballyRegistered() {
 		return
@@ -336,9 +374,9 @@ func (r *registry) Unregister(name string, addr Address) {
 
 	// at the moment, only mailboxID can pass the check above
 	r.Send(internal.UnregisterName{
-		internal.IntNodeID(r.thisNode),
-		name,
-		internal.IntMailboxID(addr.GetID().(mailboxID)),
+		Node:      internal.IntNodeID(r.thisNode),
+		Name:      name,
+		AddressID: internal.IntMailboxID(addr.GetID().(mailboxID)),
 	})
 }
 
@@ -399,7 +437,10 @@ func (r *registry) unregister(node NodeID, name string, mID mailboxID) {
 	delete(r.claims[name], mID)
 
 	if len(r.claims[name]) == 0 {
-		rm := registryMailbox(name)
+		rm := registryMailbox{
+			name:             name,
+			connectionServer: r.Address.connectionServer,
+		}
 		for mailboxToNotify := range r.notifications[rm] {
 			var addr Address
 			addr.id = mailboxToNotify
@@ -414,7 +455,7 @@ func (rm registryMailbox) isLocal() bool {
 }
 
 func (rm registryMailbox) send(msg interface{}) error {
-	connections.registry.Send(sendRegistryMessage{rm, msg})
+	rm.connectionServer.registry.Send(sendRegistryMessage{rm, msg})
 	return nil
 }
 
@@ -423,47 +464,13 @@ func (rm registryMailbox) getID() AddressID {
 }
 
 func (rm registryMailbox) notifyAddressOnTerminate(addr Address) {
-	connections.registry.Send(notifyOnTerminateRegistryAddr{rm, addr})
+	rm.connectionServer.registry.Send(notifyOnTerminateRegistryAddr{rm, addr})
 }
 
 func (rm registryMailbox) removeNotifyAddress(addr Address) {
-	connections.registry.Send(removeNotifyOnTerminateRegistryAddr{rm, addr})
+	rm.connectionServer.registry.Send(removeNotifyOnTerminateRegistryAddr{rm, addr})
 }
 
 func (rm registryMailbox) canBeGloballyRegistered() bool {
 	return false
-}
-
-// Register globally registers a given name across the cluster to the given
-// address. It can then be retrieved and manipulated via Lookup.
-//
-// The passed-in Address must be something that directly came from a New()
-// call. Addressed obtained from the network or from Lookup itself will
-// return an error instead of registering.
-func Register(name string, addr Address) error {
-	return connections.registry.Register(name, addr)
-}
-
-// Unregister globally unregisters a given name across the cluster.
-//
-// If the address passed in is not the current registrant, the call is
-// ignored, thus it is safe to call this.
-func Unregister(name string, addr Address) {
-	connections.registry.Unregister(name, addr)
-}
-
-// Lookup looks up a given name and returns a mailbox that can be used to
-// send messages and request termination notifications.
-//
-// Be sure to consult the documentation about the Registry in the
-// documentation section above; use of this address could in some
-// circumstances result in the message being delivered to more than one
-// Mailbox.
-//
-// In particular, this function does no checking as to whether the address
-// exists, as that information is intrinsically racy anyhow. If you want to
-// take extra care about it, use NotifyAddressOnTerminate, just as with
-// local addresses.
-func Lookup(name string) Address {
-	return Address{registryMailbox(name), nil, nil}
 }

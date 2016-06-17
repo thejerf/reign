@@ -103,6 +103,20 @@ func (cs *connectionServer) Terminate() {
 	cs.registry.Terminate()
 }
 
+// NewMailbox creates a new tied pair of Address and Mailbox.
+//
+// A Mailbox MUST have .Terminate() called on it when you are done with
+// it. Otherwise termination notifications will not properly fire and
+// resources will leak.
+//
+// It is not safe to copy a Mailbox by value; client code should never have
+// Mailbox appearing as a non-pointer-type in its code. It is a code smell
+// to have *Mailbox used as a map key; use AddressIDs instead.
+// instead.
+func (cs *connectionServer) NewMailbox() (Address, *Mailbox) {
+	return cs.newLocalMailbox()
+}
+
 func (cs *connectionServer) send(mID AddressID, msg interface{}) (err error) {
 	switch id := mID.(type) {
 	case registryMailbox:
