@@ -88,14 +88,15 @@ type MultipleClaim struct {
 
 type stopRegistry struct{}
 
+// This is used for unit testing
+type synchronizeRegistry struct {
+	ch chan voidtype
+}
+
 type registry struct {
 	// the set of all claims understood by the local node, organized as
 	// name -> set of mailbox IDs.
 	claims map[string]map[AddressID]voidtype
-
-	// claims arranged by node. this is necessary for processing when a
-	// node connection goes down.
-	nodeClaims map[NodeID]map[string]mailboxID
 
 	// The map of nodes -> addresses used to communicate with those nodes.
 	// When a registration is made, this is the list of nodes that will
@@ -201,13 +202,10 @@ type Names interface {
 // &connectionServer{} in an otherwise icky way...
 func newRegistry(server registryServer, node NodeID) *registry {
 	r := &registry{
-		claims:     make(map[string]map[AddressID]voidtype),
-		nodeClaims: make(map[NodeID]map[string]mailboxID),
-		thisNode:   node,
-	}
-
-	for _, node := range server.getNodes() {
-		r.nodeClaims[node] = make(map[string]mailboxID)
+		claims:         make(map[string]map[AddressID]voidtype),
+		nodeRegistries: make(map[NodeID]Address),
+		notifications:  make(map[registryMailbox]map[AddressID]voidtype),
+		thisNode:       node,
 	}
 
 	r.Address, r.Mailbox = server.newLocalMailbox()
@@ -222,6 +220,7 @@ func (r *registry) Terminate() {
 }
 
 func (r *registry) connectionStatusCallback(node NodeID, connected bool) {
+	_ = r
 	r.Send(connectionStatus{node, connected})
 }
 
@@ -277,6 +276,9 @@ func (r *registry) Serve() {
 		case internal.AllNodeClaims:
 			r.handleAllNodeClaims(msg)
 
+		case synchronizeRegistry:
+			msg.ch <- void
+
 		case stopRegistry:
 			return
 
@@ -291,30 +293,6 @@ func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 	for name, intMailbox := range msg.Claims {
 		r.register(node, name, mailboxID(intMailbox))
 	}
-}
-
-// This registers a node's registry mailbox. This should only happen once
-// per connection to that node. Even if it is the same as last time, it
-// triggers the synchronization process.
-func (r *registry) registerNodeRegistryMailbox(node NodeID, addr Address) {
-	r.nodeRegistries[node] = addr
-
-	// send initial synchronization
-	claims := map[string]internal.IntMailboxID{}
-	anc := internal.AllNodeClaims{
-		Node:   internal.IntNodeID(r.thisNode),
-		Claims: claims,
-	}
-
-	// Copy the claims. This has to be a fresh copy to make sure we don't
-	// lose anything to race conditions. If this becomes a performance
-	// bottleneck, we could try to do a serialization immediately in this
-	// step, since this gets copied and then serialized anyhow.
-	for name, mID := range r.nodeClaims[r.thisNode] {
-		claims[name] = internal.IntMailboxID(mID)
-	}
-
-	addr.Send(anc)
 }
 
 // Handle connection status deals with the connection to a node going up or
@@ -332,8 +310,15 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 		return
 	}
 
-	for name, claimant := range r.nodeClaims[msg.node] {
-		r.unregister(msg.node, name, claimant)
+	// TODO: make this more efficient?
+	for name, claimants := range r.claims {
+		for claimant, _ := range claimants {
+			if mid, ok := claimant.(mailboxID); ok {
+				if mid.NodeID() == msg.node {
+					r.unregister(msg.node, name, mid)
+				}
+			}
+		}
 	}
 
 	delete(r.nodeRegistries, msg.node)
@@ -382,11 +367,6 @@ func (r *registry) Unregister(name string, addr Address) {
 
 // This is the internal registration function.
 func (r *registry) register(node NodeID, name string, mID mailboxID) {
-	oldMailboxID, haveOld := r.nodeClaims[node][name]
-	if haveOld {
-		delete(r.claims[name], oldMailboxID)
-	}
-
 	nameClaimants, haveNameClaimants := r.claims[name]
 	if !haveNameClaimants {
 		nameClaimants = map[AddressID]voidtype{}
@@ -397,19 +377,17 @@ func (r *registry) register(node NodeID, name string, mID mailboxID) {
 
 	// If there are multiple claims now, and one of them is local,
 	// notify our local Address of the conflict.
-	localClaimant, haveLocalClaimant := r.nodeClaims[r.thisNode][name]
-	if len(nameClaimants) > 1 && haveLocalClaimant {
+	if len(nameClaimants) > 1 && mID.NodeID() == r.thisNode {
 		claimants := []Address{}
 		for claimant := range nameClaimants {
 			var addr Address
 			addr.id = claimant
+			addr.connectionServer = r.connectionServer
 			claimants = append(claimants, addr)
 		}
-		var localClaimantAddr Address
-		// only possible error from unmarshalFromID is wrong type,
-		// which we prevent by construction
-		localClaimantAddr.id = localClaimant
-		localClaimantAddr.Send(MultipleClaim{claimants, name})
+		for _, addr := range claimants {
+			addr.Send(MultipleClaim{claimants, name})
+		}
 	}
 }
 
@@ -421,22 +399,10 @@ func (r *registry) unregister(node NodeID, name string, mID mailboxID) {
 	// ensure that the unregistration matches the current one before
 	// removing it. zero value for mailboxID will never match a real one
 	// by construction in newMailboxes() (where nextMailboxID starts at 1).
-	currentRegistrant := r.nodeClaims[node][name]
-	if currentRegistrant != mID {
-		return
-	}
+	currentRegistrants := r.claims[name]
+	delete(currentRegistrants, mID)
 
-	delete(r.nodeClaims[node], name)
-
-	// paranoia, this really shouldn't happen, but if it did, it would be bad
-	_, inGlobalRegistration := r.claims[name][mID]
-	if !inGlobalRegistration {
-		panic("Serious bug: Somehow unregistered something not globally registered")
-	}
-
-	delete(r.claims[name], mID)
-
-	if len(r.claims[name]) == 0 {
+	if len(currentRegistrants) == 0 {
 		rm := registryMailbox{
 			name:             name,
 			connectionServer: r.Address.connectionServer,
@@ -444,14 +410,11 @@ func (r *registry) unregister(node NodeID, name string, mID mailboxID) {
 		for mailboxToNotify := range r.notifications[rm] {
 			var addr Address
 			addr.id = mailboxToNotify
+			addr.connectionServer = r.Address.connectionServer
 			addr.Send(MailboxTerminated(rm))
 		}
 		delete(r.notifications, rm)
 	}
-}
-
-func (rm registryMailbox) isLocal() bool {
-	return false
 }
 
 func (rm registryMailbox) send(msg interface{}) error {

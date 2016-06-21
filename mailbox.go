@@ -537,11 +537,11 @@ type Mailbox struct {
 	messages              []message
 	cond                  *sync.Cond
 	notificationAddresses map[AddressID]struct{}
-	terminated            bool
-	// used only by testing, to implement the ability to block until
-	// a notification has been processed
-	broadcastOnAddNotify bool
+	// parent and broadcastOnNotify are used only by testing, to implement the
+	// ability to block until a notification has been processed
 	parent               *mailboxes
+	terminated           bool
+	broadcastOnAddNotify bool
 }
 
 type message struct {
@@ -817,11 +817,4 @@ func (m *mailboxes) mailboxByID(mID mailboxID) (mbox *Mailbox, err error) {
 	}
 	err = ErrMailboxTerminated
 	return
-}
-
-func (m *mailboxes) mailboxCount() int {
-	m.RLock()
-	defer m.RUnlock()
-
-	return len(m.mailboxes)
 }

@@ -11,6 +11,19 @@ type Stop struct{}
 type B struct{ int }
 type C struct{ int }
 type D struct{ int }
+type FakeMailbox struct{}
+
+func (f FakeMailbox) getID() AddressID {
+	return mailboxID(1337)
+}
+
+func (f FakeMailbox) send(_ interface{}) error {
+	return nil
+}
+
+func (f FakeMailbox) notifyAddressOnTerminate(_ Address) {}
+
+func (f FakeMailbox) removeNotifyAddress(_ Address) {}
 
 var anything = func(i interface{}) bool {
 	return true
@@ -308,6 +321,23 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 	}
 }
 
+func TestGetAddress(t *testing.T) {
+	connections, _ := noClustering(NullLogger)
+	a, _ := connections.NewMailbox()
+	// Make an invalid node ID
+	a.id = mailboxID(1337)
+	a.mailbox = nil
+	if !panics(func() { a.getAddress() }) {
+		t.Fatal("does not panic when getting a remotemailbox from a node that doesn't exist")
+	}
+
+	a.connectionServer = nil
+	if !panics(func() { a.getAddress() }) {
+		t.Fatal("does not panic when attempting to get the address of an Address with no" +
+			"connectionServer")
+	}
+}
+
 func TestRemoveOfNotifications(t *testing.T) {
 	connections, _ := noClustering(NullLogger)
 
@@ -419,6 +449,13 @@ func getMarshalsAndTest(a address) ([]byte, []byte, string) {
 
 func TestMarshaling(t *testing.T) {
 	connections, _ := noClustering(NullLogger)
+
+	a, _ := connections.NewMailbox()
+	a.mailbox = FakeMailbox{}
+	_, err := a.MarshalBinary()
+	if err != ErrIllegalAddressFormat {
+		t.Fatal("Address with invalid mailbox did not error on binary marshal")
+	}
 
 	mID := mailboxID(257)
 	connections.ThisNode.ID = mID.NodeID()
