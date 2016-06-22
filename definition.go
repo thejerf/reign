@@ -22,8 +22,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/thejerf/suture"
 )
 
 // This lets people specify the permitted ciphers with the usual TLS
@@ -191,11 +189,11 @@ func noClustering(log ClusterLogger) (*connectionServer, *registry) {
 //
 // nil may be passed as the ClusterLogger, in which case the standard log.Printf
 // will be used.
-func CreateFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (suture.Service, Names, error) {
+func CreateFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
 	return createFromSpecFile(clusterSpecLocation, thisNode, log)
 }
 
-func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (suture.Service, Names, error) {
+func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
 	f, err := os.Open(clusterSpecLocation)
 	if err != nil {
 		return nil, nil, err
@@ -205,7 +203,7 @@ func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log Cluster
 }
 
 // CreateFromReader creates a cluster based on the io.Reader of your choice.
-func CreateFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (suture.Service, Names, error) {
+func CreateFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
 	return createFromReader(r, thisNode, log)
 }
 
@@ -232,7 +230,7 @@ func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (*conne
 
 // CreateFromSpec creates a cluster directly from a *ClusterSpec, the
 // ultimate in control.
-func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (suture.Service, Names, error) {
+func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
 	return createFromSpec(spec, thisNode, log)
 }
 

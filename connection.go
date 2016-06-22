@@ -79,6 +79,19 @@ type connectionServer struct {
 	*Cluster
 }
 
+// ConnectionService provides an interface to the reign connectionServer and registry objects. It
+// inherits from suture.Service and reign.Cluster.
+type ConnectionService interface {
+	NewMailbox() (Address, *Mailbox)
+
+	// Inherited from suture.Service
+	Serve()
+	Stop()
+
+	// Inherited from reign.Cluster
+	AddConnectionStatusCallback(f func(NodeID, bool))
+}
+
 func (cs *connectionServer) getNodes() []NodeID {
 	nodes := []NodeID{}
 	for nodeID := range cs.nodeConnectors {
