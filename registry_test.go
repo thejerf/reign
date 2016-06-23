@@ -24,20 +24,20 @@ func TestNewRegistry(t *testing.T) {
 }
 
 func TestConnectionStatusCallback(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	r := newRegistry(connection, connection.nodeID)
 	r.connectionStatusCallback(connection.nodeID, false)
 }
 
 func TestLookup(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	r := newRegistry(connection, connection.nodeID)
 	name := "name"
 	_ = r.Lookup(name)
 }
 
 func TestSendRegistryMessage(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
 	defer r.Stop()
@@ -46,7 +46,7 @@ func TestSendRegistryMessage(t *testing.T) {
 }
 
 func TestNotifyTerminateUnregistered(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	a, m := connection.NewMailbox()
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
@@ -71,7 +71,7 @@ func TestNotifyTerminateUnregistered(t *testing.T) {
 }
 
 func TestUnregisterTermination(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	addr, mbx := connection.NewMailbox()
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
@@ -104,7 +104,7 @@ func TestUnregisterTermination(t *testing.T) {
 }
 
 func TestRemoveOnTerminate(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	addr, mbx := connection.NewMailbox()
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
@@ -150,7 +150,7 @@ func TestRemoveOnTerminate(t *testing.T) {
 }
 
 func TestConnectionStatus(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	addr, mbx := connection.NewMailbox()
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
@@ -189,7 +189,7 @@ func TestConnectionStatus(t *testing.T) {
 }
 
 func TestInternalRegisterName(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
 	defer r.Stop()
@@ -221,7 +221,7 @@ func TestInternalRegisterName(t *testing.T) {
 }
 
 func TestInternalUnegisterName(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
 	defer r.Stop()
@@ -290,7 +290,7 @@ func TestNonGlobalRegisterable(t *testing.T) {
 }
 
 func TestInternalAllNodeClaims(t *testing.T) {
-	connection, _ := NoClustering()
+	connection, _ := noClustering(NullLogger)
 	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
 	defer r.Stop()

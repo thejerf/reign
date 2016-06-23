@@ -151,7 +151,7 @@ var clusterSpecLocation = flag.String("clusterspec", "", "The location of the cl
 // This configures reign to work in a no-clustering state. You can use
 // all mailbox functionality, and there will be no network activity or
 // configuration required.
-func NoClustering() (*connectionServer, *registry) {
+func NoClustering() (ConnectionService, *registry) {
 	return noClustering(NullLogger)
 }
 
