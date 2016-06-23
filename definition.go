@@ -393,7 +393,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 		clusterCertPEM = []byte(spec.ClusterCertPEM)
 	}
 	if clusterCertPEM != nil {
-		// assume the CERT is the first black
+		// assume the CERT is the first block
 		certDERBlock, _ := pem.Decode(clusterCertPEM)
 		if certDERBlock == nil {
 			errs = append(errs, "Cluster cert had an error not located in the cert definition")
