@@ -31,27 +31,36 @@ func TestJSONSpecification(t *testing.T) {
     "node_key_pem": "` + jsonbytes(node1_1_key) + `",
     "cluster_cert_pem": "` + jsonbytes(signing1_cert) + `"
 }`)
-	cluster, err := createFromJSON(validJSON, 0, NullLogger)
-	cluster.Terminate()
+	cluster, err := createFromJSON(validJSON, 1, NullLogger)
 	if err != nil {
 		t.Fatal("Got error constructing valid cluster:", err)
 	}
+	cluster.Terminate()
 
 	if cluster.hash == 0 {
 		t.Fatal("Cluster hash not set")
 	}
 
 	nilConnections()
+
+	// Test validation of certificate's common name.
+	cluster, err = createFromJSON(validJSON, 0, NullLogger)
+	if err == nil {
+		t.Fatal("Expected an error creating the cluster.")
+	}
+
+	nilConnections()
+
 	// Test the alternative creation methods
 	specFile, cleanup := tmpFile("spec_tmp_file", validJSON)
 	defer cleanup()
 
 	// Can we create from a good spec file?
-	service, err := CreateFromSpecFile(specFile, 0, NullLogger)
-	service.(*connectionServer).Terminate()
+	service, err := CreateFromSpecFile(specFile, 1, NullLogger)
 	if err != nil || service == nil {
 		t.Fatal("Error using CreateFromSpecFile:", err)
 	}
+	service.(*connectionServer).Terminate()
 	_, err = CreateFromSpecFile("doesnotexist", 0, NullLogger)
 	if err == nil {
 		t.Fatal("Can somehow successfully create a cluster from nonexistant file")
@@ -63,11 +72,11 @@ func TestJSONSpecification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err = CreateFromReader(goodReader, 0, NullLogger)
-	service.(*connectionServer).Terminate()
+	service, err = CreateFromReader(goodReader, 1, NullLogger)
 	if service == nil || err != nil {
 		t.Fatal("Can't create from reader properly")
 	}
+	service.(*connectionServer).Terminate()
 	nilConnections()
 
 	// and does that fail properly?
@@ -89,11 +98,11 @@ func TestJSONSpecification(t *testing.T) {
 	if err != nil {
 		t.Fatal("Unexpected marshaling problem")
 	}
-	service, err = CreateFromSpec(legalSpec, 0, NullLogger)
-	service.(*connectionServer).Terminate()
+	service, err = CreateFromSpec(legalSpec, 1, NullLogger)
 	if err != nil {
 		t.Fatal("Can't create straight from a spec")
 	}
+	service.(*connectionServer).Terminate()
 	nilConnections()
 	legalSpec.Nodes = map[string]*NodeDefinition{}
 	service, err = CreateFromSpec(legalSpec, 0, NullLogger)
@@ -104,6 +113,8 @@ func TestJSONSpecification(t *testing.T) {
 
 // to see if this catches all errors, examine the coverage graph
 func TestJSONSpecErrors(t *testing.T) {
+	t.Parallel()
+
 	defer nilConnections()
 
 	noNodes := []byte(`{}`)
@@ -200,6 +211,8 @@ func TestCoverNoClustering(t *testing.T) {
 }
 
 func TestResolveLog(t *testing.T) {
+	t.Parallel()
+
 	if resolveLog(nil) != StdLogger {
 		t.Fatal("Don't get StdLogger for nil")
 	}

@@ -100,7 +100,9 @@ func (cs *connectionServer) waitForListen() {
 }
 
 func (cs *connectionServer) Terminate() {
-	cs.registry.Terminate()
+	if cs.registry != nil {
+		cs.registry.Terminate()
+	}
 }
 
 func (cs *connectionServer) send(mID AddressID, msg interface{}) (err error) {

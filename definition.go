@@ -50,6 +50,8 @@ var cipherToID = map[string]uint16{
 	"TLS_RSA_WITH_3DES_EDE_CBC_SHA":           0x000a,
 	"TLS_RSA_WITH_AES_128_CBC_SHA":            0x002f,
 	"TLS_RSA_WITH_AES_256_CBC_SHA":            0x0035,
+	"TLS_RSA_WITH_AES_128_GCM_SHA256":         0x009c,
+	"TLS_RSA_WITH_AES_256_GCM_SHA384":         0x009d,
 	"TLS_ECDHE_ECDSA_WITH_RC4_128_SHA":        0xc007,
 	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":    0xc009,
 	"TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":    0xc00a,
@@ -59,6 +61,8 @@ var cipherToID = map[string]uint16{
 	"TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":      0xc014,
 	"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":   0xc02f,
 	"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": 0xc02b,
+	"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":   0xc030,
+	"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384": 0xc02c,
 }
 
 // NodeID is used to identify the current node's ID.
@@ -357,15 +361,17 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	}
 
 	cluster := &Cluster{}
+	var cert tls.Certificate
+	var err error
 
 	if spec.NodeKeyPath != "" && spec.NodeCertPath != "" {
-		cert, err := tls.LoadX509KeyPair(spec.NodeCertPath, spec.NodeKeyPath)
+		cert, err = tls.LoadX509KeyPair(spec.NodeCertPath, spec.NodeKeyPath)
 		if err != nil {
 			errs = append(errs, "Error from loading the node cert from the disk: "+err.Error())
 		}
 		cluster.Certificate = cert
 	} else if spec.NodeKeyPEM != "" && spec.NodeCertPEM != "" {
-		cert, err := tls.X509KeyPair([]byte(spec.NodeCertPEM), []byte(spec.NodeKeyPEM))
+		cert, err = tls.X509KeyPair([]byte(spec.NodeCertPEM), []byte(spec.NodeKeyPEM))
 		if err != nil {
 			errs = append(errs, "Error loading the node cert from PEMs: "+err.Error())
 		}
@@ -376,7 +382,16 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 			errs = append(errs, "No valid certificate for this node found.")
 		}
 	}
-	// FIXME: Validate the cert's node is the common name for the cert
+
+	// Validate the cert's node is the common name for the cert
+	if len(cert.Certificate) > 0 {
+		x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			errs = append(errs, err.Error())
+		} else if nodeID := fmt.Sprintf("%d", thisNode); x509Cert.Subject.CommonName != nodeID {
+			errs = append(errs, fmt.Sprintf("The current node ID (%s) does not match the certificate's common name (%s)", nodeID, x509Cert.Subject.CommonName))
+		}
+	}
 
 	var clusterCertPEM []byte
 	if spec.ClusterCertPath != "" {
@@ -389,7 +404,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 		clusterCertPEM = []byte(spec.ClusterCertPEM)
 	}
 	if clusterCertPEM != nil {
-		// assume the CERT is the first black
+		// assume the CERT is the first block
 		certDERBlock, _ := pem.Decode(clusterCertPEM)
 		if certDERBlock == nil {
 			errs = append(errs, "Cluster cert had an error not located in the cert definition")
