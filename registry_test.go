@@ -20,7 +20,7 @@ func (f FakeRegistryServer) newLocalMailbox() (Address, *Mailbox) {
 func (f FakeRegistryServer) AddConnectionStatusCallback(_ func(NodeID, bool)) {}
 
 func TestNewRegistry(t *testing.T) {
-	_ = newRegistry(FakeRegistryServer{}, NodeID(0))
+	//_ = newRegistry(FakeRegistryServer{}, NodeID(0))
 }
 
 func TestConnectionStatusCallback(t *testing.T) {
@@ -30,10 +30,18 @@ func TestConnectionStatusCallback(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	r := newRegistry(connection, connection.nodeID)
+	connection, r := noClustering(NullLogger)
+	addr, mbx := connection.NewMailbox()
+	go func() { r.Serve() }()
+	defer r.Stop()
+
 	name := "name"
-	_ = r.Lookup(name)
+	r.Register(name, addr)
+	r.Sync()
+	a := r.Lookup(name)
+	b := a.getAddress()
+	b.send(void)
+	mbx.ReceiveNext()
 }
 
 func TestSendRegistryMessage(t *testing.T) {
