@@ -31,7 +31,7 @@ func TestMinimalTestBed(t *testing.T) {
 	ntb := testbed(nil)
 	defer ntb.terminate()
 
-	if ntb.addr1_1.GetID() == ntb.addr1_2.GetID() {
+	if ntb.addr1_1.mailboxID == ntb.addr1_2.mailboxID {
 		t.Fatal("Both mailboxs have the same ID")
 	}
 
@@ -126,7 +126,7 @@ func TestHappyPathRemoteLink(t *testing.T) {
 	// if we get the terminate.
 	ntb.mailbox1_2.Terminate()
 	termNotice := ntb.mailbox1_1.ReceiveNext()
-	if termNotice.(mailboxID) != ntb.mailbox1_2.getID() {
+	if mailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
 		t.Fatal("Got a termination notice for the wrong mailbox.")
 	}
 }
@@ -162,7 +162,7 @@ func TestHappyPathPartialUnnotify(t *testing.T) {
 	// now, ensure that we still get notified on the remaining address
 	ntb.mailbox1_2.Terminate()
 	termNotice := ntb.mailbox1_2.ReceiveNext()
-	if termNotice.(mailboxID) != ntb.mailbox1_2.getID() {
+	if mailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
 		t.Fatal("didn't get the right termination notice or something:", termNotice)
 	}
 }
@@ -199,7 +199,7 @@ func TestRemoteLinkErrorPaths(t *testing.T) {
 
 	// Send the remoteMailbox a message for the wrong node. (Verified that
 	// this goes down the right code path via coverage analysis.)
-	ntb.remote2to1.Send(&internal.IncomingMailboxMessage{internal.IntMailboxID(ntb.mailbox1_1.getID().(mailboxID)), "moo"})
+	ntb.remote2to1.Send(&internal.IncomingMailboxMessage{internal.IntMailboxID(ntb.mailbox1_1.id), "moo"})
 	time.Sleep(time.Second)
 }
 

@@ -50,14 +50,20 @@ type AllNodeClaims struct {
 type RegisterName struct {
 	Node      IntNodeID
 	Name      string
-	AddressID IntMailboxID
+	MailboxID IntMailboxID
 }
 
 // UnregisterName is part of the internal registry's private communication.
 type UnregisterName struct {
 	Node      IntNodeID
 	Name      string
-	AddressID IntMailboxID
+	MailboxID IntMailboxID
+}
+
+// UnregisterMailbox is part of the internal registry's private communication.
+type UnregisterMailbox struct {
+	Node      IntNodeID
+	MailboxID IntMailboxID
 }
 
 // ClusterHandshake is part of the cluster connection process.

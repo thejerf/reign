@@ -6,23 +6,6 @@ import (
 	"github.com/thejerf/reign/internal"
 )
 
-type FakeRegistryServer struct{}
-
-func (f FakeRegistryServer) getNodes() []NodeID {
-	return []NodeID{13, 37}
-}
-
-func (f FakeRegistryServer) newLocalMailbox() (Address, *Mailbox) {
-	addr := Address{nil, nil, nil}
-	return addr, nil
-}
-
-func (f FakeRegistryServer) AddConnectionStatusCallback(_ func(NodeID, bool)) {}
-
-func TestNewRegistry(t *testing.T) {
-	//_ = newRegistry(FakeRegistryServer{}, NodeID(0))
-}
-
 func TestConnectionStatusCallback(t *testing.T) {
 	connection, _ := noClustering(NullLogger)
 	r := newRegistry(connection, connection.nodeID)
@@ -39,128 +22,13 @@ func TestLookup(t *testing.T) {
 	r.Register(name, addr)
 	r.Sync()
 	a := r.Lookup(name)
-	b := a.getAddress()
-	b.send(void)
+	a.Send(void)
 	mbx.ReceiveNext()
 }
 
-func TestSendRegistryMessage(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	r := newRegistry(connection, connection.nodeID)
-	go func() { r.Serve() }()
-	defer r.Stop()
-	// This doesn't really do anything
-	r.send(sendRegistryMessage{message: "TestSendRegistryMessage 123 123"})
-}
-
-func TestNotifyTerminateUnregistered(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	a, m := connection.NewMailbox()
-	r := newRegistry(connection, connection.nodeID)
-	go func() { r.Serve() }()
-
-	name := "blah"
-
-	rm := registryMailbox{
-		name:             name,
-		connectionServer: connection,
-	}
-
-	// This should send MailboxTerminated to the mailbox associated with a (i.e. m), since
-	// name was never registered with the registry
-	n := notifyOnTerminateRegistryAddr{mailbox: rm, addr: a}
-	r.send(n)
-	r.Stop()
-
-	mTerm := m.ReceiveNext()
-	if _, ok := mTerm.(MailboxTerminated); !ok {
-		t.Fatal("Should have received a MailboxTerminated after registry is stoppeds")
-	}
-}
-
-func TestUnregisterTermination(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	addr, mbx := connection.NewMailbox()
-	r := newRegistry(connection, connection.nodeID)
-	go func() { r.Serve() }()
-	defer r.Stop()
-
-	name := "blah"
-
-	r.Register(name, addr)
-
-	rm := registryMailbox{
-		name:             name,
-		connectionServer: connection,
-	}
-
-	n := notifyOnTerminateRegistryAddr{mailbox: rm, addr: addr}
-
-	// Send twice, to test the case where the notification map does and doesn't already have
-	// an entry for the mailbox
-	r.send(n)
-	r.send(n)
-
-	// This ought to send a MailboxTerminated message to the mailbox associated with addr
-	// (i.e. mbx)
-	r.Unregister(name, addr)
-
-	mTerm := mbx.ReceiveNext()
-	if _, ok := mTerm.(MailboxTerminated); !ok {
-		t.Fatal("Should have received a MailboxTerminated after registry is stopped")
-	}
-}
-
-func TestRemoveOnTerminate(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	addr, mbx := connection.NewMailbox()
-	r := newRegistry(connection, connection.nodeID)
-	go func() { r.Serve() }()
-	defer r.Stop()
-
-	realName := "blah"
-	fakeName := "blorg"
-
-	// Register this name with this addr
-	r.Register(realName, addr)
-
-	// Notify addr when rm gets terminated
-	realRegistryMailbox := registryMailbox{
-		name:             realName,
-		connectionServer: connection,
-	}
-	notify := notifyOnTerminateRegistryAddr{mailbox: realRegistryMailbox, addr: addr}
-	r.send(notify)
-
-	// Don't notify addr anymore when rm gets terminated
-	removeNotify := removeNotifyOnTerminateRegistryAddr{mailbox: realRegistryMailbox, addr: addr}
-	r.send(removeNotify)
-
-	// This mailbox was never registered under fakeName
-	fakeRegistryMailbox := registryMailbox{
-		name:             fakeName,
-		connectionServer: connection,
-	}
-	removeNotify = removeNotifyOnTerminateRegistryAddr{mailbox: fakeRegistryMailbox, addr: addr}
-	// This should do nothing
-	r.send(removeNotify)
-
-	// This should not send a message to addr
-	r.unregister(connection.nodeID, realName, mbx.id)
-
-	// We need to make sure that mbx didn't receive a MailboxTerminated. Do this by sending it a void
-	// message and popping from the message queue to make sure that void was the first message it received
-	mbx.send(void)
-	v := mbx.ReceiveNext()
-	if _, ok := v.(voidtype); !ok {
-		t.Fatal("Should not have received anything but voidtype after unsubscribing for termination notification")
-	}
-}
-
 func TestConnectionStatus(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
+	connection, r := noClustering(NullLogger)
 	addr, mbx := connection.NewMailbox()
-	r := newRegistry(connection, connection.nodeID)
 	go func() { r.Serve() }()
 	defer r.Stop()
 
@@ -192,13 +60,46 @@ func TestConnectionStatus(t *testing.T) {
 	// mbx should not have received a MultipleClaim
 	v := mbx.ReceiveNext()
 	if _, ok := v.(voidtype); !ok {
-		t.Fatalf("Did not expect a %#v message: ", v)
+		t.Fatalf("Did not expect a %t message: ", v)
+	}
+}
+
+func TestUnregisterOnTerminate(t *testing.T) {
+	connection, r := noClustering(NullLogger)
+	go func() { r.Serve() }()
+
+	addr, mbx := connection.NewMailbox()
+	names := []string{"blah", "blech", "blorg"}
+
+	for _, name := range names {
+		r.Register(name, addr)
+	}
+	r.Sync()
+
+	// Make sure Lookup works
+	for _, name := range names {
+		addr := r.Lookup(name)
+		if addr == nil {
+			t.Fatalf("Lookup failed on registered name '%s'", name)
+		}
+	}
+
+	// Terminate() should call r.UnregisterMailbox and unregistered all the names that
+	// belong to mbx
+	mbx.Terminate()
+	r.Sync()
+
+	// Now make sure that all the names have been unregistered
+	for _, name := range names {
+		addr := r.Lookup(name)
+		if addr != nil {
+			t.Fatalf("Terminate() did not unregister name '%s'", name)
+		}
 	}
 }
 
 func TestInternalRegisterName(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	r := newRegistry(connection, connection.nodeID)
+	connection, r := noClustering(NullLogger)
 	go func() { r.Serve() }()
 	defer r.Stop()
 
@@ -229,8 +130,7 @@ func TestInternalRegisterName(t *testing.T) {
 }
 
 func TestInternalUnegisterName(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	r := newRegistry(connection, connection.nodeID)
+	connection, r := noClustering(NullLogger)
 	go func() { r.Serve() }()
 	defer r.Stop()
 
@@ -267,39 +167,8 @@ func TestInternalUnegisterName(t *testing.T) {
 	<-synch
 }
 
-func TestNonGlobalRegisterable(t *testing.T) {
-	// Attempting to send anything through this registry will panic, since
-	// there is no connectionServer anywhere
-	r := registry{}
-
-	name := "blah"
-
-	// Making addr.id = noMailbox means that canBeGloballyRegistered() == false,
-	// So Register and Unregister should return immediately without trying to Send anything
-	// through the registry
-	addr := Address{}
-	addr.id = noMailbox{mailboxID: mailboxID(1337)}
-
-	// Need an error-checking closure, because Register might panic (though it shouldn't)
-	f := func() {
-		err := r.Register(name, addr)
-		if err != ErrCantGloballyRegister {
-			t.Fatal("Regsiter with a noMailbox AddressID should have failed")
-		}
-	}
-	if panics(f) {
-		t.Fatal("Register with a noMailbox should not panic")
-	}
-
-	// Should do nothing
-	if panics(func() { r.Unregister(name, addr) }) {
-		t.Fatal("Unregister with a noMailbox should not panic")
-	}
-}
-
 func TestInternalAllNodeClaims(t *testing.T) {
-	connection, _ := noClustering(NullLogger)
-	r := newRegistry(connection, connection.nodeID)
+	connection, r := noClustering(NullLogger)
 	go func() { r.Serve() }()
 	defer r.Stop()
 

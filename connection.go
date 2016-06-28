@@ -130,16 +130,11 @@ func (cs *connectionServer) NewMailbox() (Address, *Mailbox) {
 	return cs.newLocalMailbox()
 }
 
-func (cs *connectionServer) send(mID AddressID, msg interface{}) (err error) {
-	switch id := mID.(type) {
-	case registryMailbox:
-		return cs.registry.Send(sendRegistryMessage{id, msg})
-	case mailboxID:
-		if id.NodeID() == cs.ThisNode.ID {
-			err = cs.mailboxes.sendByID(id, msg)
-		} else {
-			err = cs.remoteMailboxes[id.NodeID()].send(internal.OutgoingMailboxMessage{internal.IntMailboxID(id), msg}, "remote mailbox message")
-		}
+func (cs *connectionServer) send(mID mailboxID, msg interface{}) (err error) {
+	if mID.NodeID() == cs.ThisNode.ID {
+		err = cs.mailboxes.sendByID(mID, msg)
+	} else {
+		err = cs.remoteMailboxes[mID.NodeID()].send(internal.OutgoingMailboxMessage{internal.IntMailboxID(mID), msg}, "remote mailbox message")
 	}
 	return
 }

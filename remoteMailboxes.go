@@ -129,7 +129,7 @@ func (rm *remoteMailboxes) Serve() {
 			for localID := range localIDs {
 				// FIXME: sendByID?
 				var addr Address
-				addr.id = localID
+				addr.mailboxID = localID
 				addr.connectionServer = rm.connectionServer
 				addr.Send(MailboxTerminated(remoteID))
 			}
@@ -169,7 +169,7 @@ func (rm *remoteMailboxes) Serve() {
 		// an extra layer of pointer indirection added to it.
 		case *internal.IncomingMailboxMessage:
 			var addr Address
-			addr.id = mailboxID(msg.Target)
+			addr.mailboxID = mailboxID(msg.Target)
 			addr.connectionServer = rm.connectionServer
 			addr.Send(msg.Message)
 
@@ -200,7 +200,7 @@ func (rm *remoteMailboxes) Serve() {
 				err := rm.send(&internal.NotifyNodeOnTerminate{internal.IntMailboxID(remoteID)}, "termination notification")
 				if err != nil {
 					var addr Address
-					addr.id = localID
+					addr.mailboxID = localID
 					addr.connectionServer = rm.connectionServer
 					addr.Send(MailboxTerminated(remoteID))
 					// FIXME: Really? Panic?
@@ -239,7 +239,7 @@ func (rm *remoteMailboxes) Serve() {
 
 			for subscribed := range links {
 				var addr Address
-				addr.id = subscribed
+				addr.mailboxID = subscribed
 				addr.connectionServer = rm.connectionServer
 				addr.Send(MailboxTerminated(remoteID))
 			}
@@ -251,27 +251,23 @@ func (rm *remoteMailboxes) Serve() {
 			// message
 			localID := mailboxID(msg.IntMailboxID)
 			var addr Address
-			addr.id = localID
+			addr.mailboxID = localID
 			addr.connectionServer = rm.connectionServer
 			addr.NotifyAddressOnTerminate(rm.Address)
 
 		case *internal.RemoveNotifyNodeOnTerminate:
 			localID := mailboxID(msg.IntMailboxID)
 			var addr Address
-			addr.id = localID
+			addr.mailboxID = localID
 			addr.connectionServer = rm.connectionServer
 			addr.RemoveNotifyAddress(rm.Address)
 
 		// Note this is a local mailbox.
 		case MailboxTerminated:
-			id, isRealMailbox := AddressID(msg).(mailboxID)
-			if isRealMailbox {
-				// if we are receiving this, apparently the other side wants to
-				// hear about it
-				_ = rm.send(&internal.RemoteMailboxTerminated{internal.IntMailboxID(id)}, "mailbox terminated normally")
-			} else {
-				rm.Trace("Somehow got a mailbox termination for a non-mailboxID: %#v", msg)
-			}
+			id := mailboxID(msg)
+			// if we are receiving this, apparently the other side wants to
+			// hear about it
+			_ = rm.send(&internal.RemoteMailboxTerminated{internal.IntMailboxID(id)}, "mailbox terminated normally")
 
 		// This allows us to test proper error handling, despite
 		// the fact I don't know how to panic any of the above code

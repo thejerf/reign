@@ -116,11 +116,11 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	ntb.addr2_2, ntb.mailbox2_2 = ntb.c2.NewMailbox()
 	ntb.addr2_2.connectionServer = ntb.c2
 
-	ntb.rem1_2 = Address{ntb.addr1_2.id, ntb.c1, nil}
-	ntb.rem2_2 = Address{ntb.addr2_2.id, ntb.c1, nil}
+	ntb.rem1_2 = Address{ntb.addr1_2.mailboxID, nil, ntb.c1}
+	ntb.rem2_2 = Address{ntb.addr2_2.mailboxID, nil, ntb.c1}
 
-	ntb.rem1_1 = Address{ntb.addr1_1.id, ntb.c2, nil}
-	ntb.rem2_1 = Address{ntb.addr2_1.id, ntb.c2, nil}
+	ntb.rem1_1 = Address{ntb.addr1_1.mailboxID, nil, ntb.c2}
+	ntb.rem2_1 = Address{ntb.addr2_1.mailboxID, nil, ntb.c2}
 
 	ntb.remote1to2 = ntb.c1.remoteMailboxes[2]
 	ntb.remote2to1 = ntb.c2.remoteMailboxes[1]

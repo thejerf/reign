@@ -63,7 +63,7 @@ just goes away.
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"math/rand"
 	"sync"
 
 	"github.com/thejerf/reign/internal"
@@ -95,20 +95,17 @@ type synchronizeRegistry struct {
 	ch chan voidtype
 }
 
+// IMPORTANT: Do not call the private (lowercase) methods of registry without taking out the lock (registry.m)
+// Most of the functionality required can be accessed through the publically-exposed (uppercase) methods
 type registry struct {
 	// the set of all claims understood by the local node, organized as
 	// name -> set of mailbox IDs.
-	claims map[string]map[AddressID]voidtype
+	claims map[string]map[mailboxID]voidtype
 
 	// The map of nodes -> addresses used to communicate with those nodes.
 	// When a registration is made, this is the list of nodes that will
 	// receive notifications of the new address. This only has remote nodes.
 	nodeRegistries map[NodeID]Address
-
-	// This is the set of notification on terminate we currently have.
-	// When a node name is unclaimed by anybody, we check this for any
-	// notifications that need to go out.
-	notifications map[registryMailbox]map[AddressID]voidtype
 
 	m sync.Mutex
 
@@ -121,30 +118,6 @@ type registry struct {
 type connectionStatus struct {
 	node      NodeID
 	connected bool
-}
-
-// A registryMailbox is a mailbox that reflects the Registry's current
-// state... that is, at the time you "send" a message, it uses the
-// registry's current information about that name to determine what to
-// do. It is, therefore, dynamic.
-type registryMailbox struct {
-	name             string
-	connectionServer *connectionServer
-}
-
-type sendRegistryMessage struct {
-	mailbox registryMailbox
-	message interface{}
-}
-
-type notifyOnTerminateRegistryAddr struct {
-	mailbox registryMailbox
-	addr    Address
-}
-
-type removeNotifyOnTerminateRegistryAddr struct {
-	mailbox registryMailbox
-	addr    Address
 }
 
 // This abstracts out the connectionServer for the registry, allowing it to
@@ -160,7 +133,7 @@ type registryServer interface {
 type NamesDebugger interface {
 	AddressCount() uint
 	AllNames() []string
-	DumpClaims() map[string][]AddressID
+	DumpClaims() map[string][]mailboxID
 	DumpJSON() string
 	SeenNames(...string) []bool
 }
@@ -207,7 +180,7 @@ type NamesDebugger interface {
 // ignored, thus it is safe to call this.
 type Names interface {
 	GetDebugger() NamesDebugger
-	Lookup(string) Address
+	Lookup(string) *Address
 	Register(string, Address) error
 	SeenNames(...string) []bool
 	Sync()
@@ -219,9 +192,8 @@ type Names interface {
 // &connectionServer{} in an otherwise icky way...
 func newRegistry(server *connectionServer, node NodeID) *registry {
 	r := &registry{
-		claims:         make(map[string]map[AddressID]voidtype),
+		claims:         make(map[string]map[mailboxID]voidtype),
 		nodeRegistries: make(map[NodeID]Address),
-		notifications:  make(map[registryMailbox]map[AddressID]voidtype),
 		thisNode:       node,
 	}
 
@@ -250,36 +222,9 @@ func (r *registry) Serve() {
 	for {
 		m := r.ReceiveNext()
 		switch msg := m.(type) {
-		case sendRegistryMessage:
-			fmt.Println(msg)
-
-		case notifyOnTerminateRegistryAddr:
-			r.m.Lock()
-			names, haveNames := r.claims[msg.mailbox.name]
-			if !haveNames || len(names) == 0 {
-				msg.addr.Send(MailboxTerminated(msg.mailbox))
-			}
-			notificationsForName, haveNotifications := r.notifications[msg.mailbox]
-			if haveNotifications {
-				notificationsForName[msg.addr.GetID()] = void
-			} else {
-				r.notifications[msg.mailbox] = map[AddressID]voidtype{msg.addr.GetID(): void}
-			}
-			r.m.Unlock()
-
-		case removeNotifyOnTerminateRegistryAddr:
-			r.m.Lock()
-			names, haveNames := r.claims[msg.mailbox.name]
-			if !haveNames {
-				return
-			}
-
-			delete(names, msg.mailbox)
-			r.m.Unlock()
-
 		case internal.RegisterName:
 			r.m.Lock()
-			r.register(NodeID(msg.Node), msg.Name, mailboxID(msg.AddressID))
+			r.register(NodeID(msg.Node), msg.Name, mailboxID(msg.MailboxID))
 
 			if NodeID(msg.Node) == r.thisNode {
 				r.toOtherNodes(msg)
@@ -288,11 +233,17 @@ func (r *registry) Serve() {
 
 		case internal.UnregisterName:
 			r.m.Lock()
-			r.unregister(NodeID(msg.Node), msg.Name, mailboxID(msg.AddressID))
+			r.unregister(NodeID(msg.Node), msg.Name, mailboxID(msg.MailboxID))
 
 			if NodeID(msg.Node) == r.thisNode {
 				r.toOtherNodes(msg)
 			}
+			r.m.Unlock()
+
+		// This should only be called internally
+		case internal.UnregisterMailbox:
+			r.m.Lock()
+			r.unregisterMailbox(NodeID(msg.Node), mailboxID(msg.MailboxID))
 			r.m.Unlock()
 
 		case connectionStatus:
@@ -310,9 +261,6 @@ func (r *registry) Serve() {
 			msg.ch <- void
 
 		case stopRegistry:
-			return
-
-		case MailboxTerminated:
 			return
 		}
 	}
@@ -336,11 +284,8 @@ func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 //
 // It turns out we don't really care when a node comes up; we expect the
 // semantics of the clustering to just carry us through until the node is
-// up (all attempts to link to any remote addresses we may have will get
-// MailboxTerminated back from the clustering anyhow). But when the
-// connection goes down, we do need to unregister all the claims on that
-// node, which will then trigger the usual handling of MailboxTerminated
-// messages.
+// up. But when the connection goes down, we do need to unregister all
+// the claims on that node
 func (r *registry) handleConnectionStatus(msg connectionStatus) {
 	if msg.connected == true {
 		return
@@ -349,10 +294,8 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 	// TODO: make this more efficient?
 	for name, claimants := range r.claims {
 		for claimant := range claimants {
-			if mid, ok := claimant.(mailboxID); ok {
-				if mid.NodeID() == msg.node {
-					r.unregister(msg.node, name, mid)
-				}
+			if claimant.NodeID() == msg.node {
+				r.unregister(msg.node, name, claimant)
 			}
 		}
 	}
@@ -366,16 +309,32 @@ func (r *registry) toOtherNodes(msg interface{}) {
 	}
 }
 
-func (r *registry) Lookup(s string) Address {
-	rm := registryMailbox{
-		name:             s,
-		connectionServer: r.Address.connectionServer,
+func (r *registry) Lookup(s string) *Address {
+	r.m.Lock()
+	defer r.m.Unlock()
+
+	claims := r.claims[s]
+	claimIDs := make([]mailboxID, 0, len(claims))
+	for k := range claims {
+		claimIDs = append(claimIDs, k)
 	}
-	return Address{rm, r.Address.connectionServer, nil}
+
+	// If there is nothing in the registry with the given name, return nil
+	if len(claimIDs) == 0 {
+		return nil
+	}
+
+	// Pick a random ID from our list of IDs registered to this name and return it
+	id := claimIDs[rand.Intn(len(claims))]
+	return &Address{
+		mailboxID:        mailboxID(id),
+		connectionServer: r.connectionServer,
+		mailbox:          nil,
+	}
 }
 
 func (r *registry) Register(name string, addr Address) error {
-	if !addr.GetID().canBeGloballyRegistered() {
+	if !addr.canBeGloballyRegistered() {
 		return ErrCantGloballyRegister
 	}
 
@@ -383,13 +342,13 @@ func (r *registry) Register(name string, addr Address) error {
 	r.Send(internal.RegisterName{
 		Node:      internal.IntNodeID(r.thisNode),
 		Name:      name,
-		AddressID: internal.IntMailboxID(addr.GetID().(mailboxID)),
+		MailboxID: internal.IntMailboxID(addr.mailboxID),
 	})
 	return nil
 }
 
 func (r *registry) Unregister(name string, addr Address) {
-	if !addr.GetID().canBeGloballyRegistered() {
+	if !addr.canBeGloballyRegistered() {
 		return
 	}
 
@@ -397,8 +356,19 @@ func (r *registry) Unregister(name string, addr Address) {
 	r.Send(internal.UnregisterName{
 		Node:      internal.IntNodeID(r.thisNode),
 		Name:      name,
-		AddressID: internal.IntMailboxID(addr.GetID().(mailboxID)),
+		MailboxID: internal.IntMailboxID(addr.mailboxID),
 	})
+}
+
+// Unregisters all names that belong to the given mailbox. This may only be done locally.
+// It will subsequently call unregister for every name associated with mID
+func (r *registry) UnregisterMailbox(node NodeID, mID mailboxID) {
+	if mID.NodeID() == node && node == r.thisNode {
+		r.Send(internal.UnregisterMailbox{
+			Node:      internal.IntNodeID(node),
+			MailboxID: internal.IntMailboxID(mID),
+		})
+	}
 }
 
 func (r *registry) GetDebugger() NamesDebugger {
@@ -409,7 +379,7 @@ func (r *registry) GetDebugger() NamesDebugger {
 func (r *registry) register(node NodeID, name string, mID mailboxID) {
 	nameClaimants, haveNameClaimants := r.claims[name]
 	if !haveNameClaimants {
-		nameClaimants = map[AddressID]voidtype{}
+		nameClaimants = map[mailboxID]voidtype{}
 		r.claims[name] = nameClaimants
 	}
 
@@ -421,7 +391,7 @@ func (r *registry) register(node NodeID, name string, mID mailboxID) {
 		claimants := []Address{}
 		for claimant := range nameClaimants {
 			var addr Address
-			addr.id = claimant
+			addr.mailboxID = claimant
 			addr.connectionServer = r.connectionServer
 			claimants = append(claimants, addr)
 		}
@@ -439,33 +409,43 @@ func (r *registry) unregister(node NodeID, name string, mID mailboxID) {
 	// ensure that the unregistration matches the current one before
 	// removing it. zero value for mailboxID will never match a real one
 	// by construction in newMailboxes() (where nextMailboxID starts at 1).
-	currentRegistrants := r.claims[name]
+	currentRegistrants, ok := r.claims[name]
+	if !ok {
+		// TODO: log error here
+		return
+	}
 	delete(currentRegistrants, mID)
 
-	if len(currentRegistrants) == 0 {
-		rm := registryMailbox{
-			name:             name,
-			connectionServer: r.Address.connectionServer,
+	/*if node == r.thisNode && mID.NodeID() == r.thisNode {
+		mbox, err := r.Address.connectionServer.mailboxes.mailboxByID(mID)
+		if err == nil {
+			mbox.Terminate()
 		}
-		for mailboxToNotify := range r.notifications[rm] {
-			var addr Address
-			addr.id = mailboxToNotify
-			addr.connectionServer = r.Address.connectionServer
-			addr.Send(MailboxTerminated(rm))
+		// TODO: log an error here
+	}*/
+}
+
+// this unregisters all names associated with the given mailbox ID
+func (r *registry) unregisterMailbox(node NodeID, mID mailboxID) {
+	// TODO: make this more efficient?
+	for name, claimants := range r.claims {
+		for claimant := range claimants {
+			if claimant == mID {
+				r.unregister(node, name, claimant)
+			}
 		}
-		delete(r.notifications, rm)
 	}
 }
 
 // RegistryDebugger methods
 
-func (r *registry) DumpClaims() map[string][]AddressID {
+func (r *registry) DumpClaims() map[string][]mailboxID {
 	r.m.Lock()
 	defer r.m.Unlock()
 
-	copy := make(map[string][]AddressID, len(r.claims))
+	copy := make(map[string][]mailboxID, len(r.claims))
 	for name := range r.claims {
-		addrs := make([]AddressID, 0, len(r.claims[name]))
+		addrs := make([]mailboxID, 0, len(r.claims[name]))
 		for addr := range r.claims[name] {
 			addrs = append(addrs, addr)
 		}
@@ -515,27 +495,4 @@ func (r *registry) SeenNames(names ...string) []bool {
 		seen = append(seen, ok)
 	}
 	return seen
-}
-
-// registryMailbox methods
-
-func (rm registryMailbox) send(msg interface{}) error {
-	rm.connectionServer.registry.Send(sendRegistryMessage{rm, msg})
-	return nil
-}
-
-func (rm registryMailbox) getID() AddressID {
-	return rm
-}
-
-func (rm registryMailbox) notifyAddressOnTerminate(addr Address) {
-	rm.connectionServer.registry.Send(notifyOnTerminateRegistryAddr{rm, addr})
-}
-
-func (rm registryMailbox) removeNotifyAddress(addr Address) {
-	rm.connectionServer.registry.Send(removeNotifyOnTerminateRegistryAddr{rm, addr})
-}
-
-func (rm registryMailbox) canBeGloballyRegistered() bool {
-	return false
 }
