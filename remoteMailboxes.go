@@ -23,7 +23,7 @@ type messageSender interface {
 type remoteMailboxes struct {
 	connection messageSender
 	NodeID
-	Address
+	*Address
 	parent          *mailboxes
 	outgoingMailbox *Mailbox
 	ClusterLogger
@@ -36,7 +36,7 @@ type remoteMailboxes struct {
 	// all the mailboxes are nicely sorted out for just that node,
 	// then it's the remote mailbox in question, then it's the set of
 	// local mailboxes that are subscribed to that remote mailbox.
-	linksToRemote map[mailboxID]map[mailboxID]voidtype
+	linksToRemote map[MailboxID]map[MailboxID]voidtype
 
 	// a debugging function that allows us to examine the messages flowing
 	// through
@@ -69,7 +69,7 @@ func newRemoteMailboxes(connectionServer *connectionServer, mailboxes *mailboxes
 		parent:           mailboxes,
 		NodeID:           source,
 		connectionServer: connectionServer,
-		linksToRemote:    make(map[mailboxID]map[mailboxID]voidtype)}
+		linksToRemote:    make(map[MailboxID]map[MailboxID]voidtype)}
 	rm.condition = sync.NewCond(&rm.Mutex)
 	return rm
 }
@@ -129,12 +129,12 @@ func (rm *remoteMailboxes) Serve() {
 			for localID := range localIDs {
 				// FIXME: sendByID?
 				var addr Address
-				addr.id = localID
+				addr.mailboxID = localID
 				addr.connectionServer = rm.connectionServer
 				addr.Send(MailboxTerminated(remoteID))
 			}
 		}
-		rm.linksToRemote = make(map[mailboxID]map[mailboxID]voidtype)
+		rm.linksToRemote = make(map[MailboxID]map[MailboxID]voidtype)
 
 		if r := recover(); r != nil {
 			rm.Error("While handling mailbox, got fatal error (this is a serious bug): %s", myString(r))
@@ -169,7 +169,7 @@ func (rm *remoteMailboxes) Serve() {
 		// an extra layer of pointer indirection added to it.
 		case *internal.IncomingMailboxMessage:
 			var addr Address
-			addr.id = mailboxID(msg.Target)
+			addr.mailboxID = MailboxID(msg.Target)
 			addr.connectionServer = rm.connectionServer
 			addr.Send(msg.Message)
 
@@ -178,8 +178,8 @@ func (rm *remoteMailboxes) Serve() {
 			// link. This will eventually be a memory leak.
 			// Unfortunately it implies we need another map of local
 			// address to their relevant entries and to subscribe to them too.
-			remoteID := mailboxID(msg.Remote)
-			localID := mailboxID(msg.Local)
+			remoteID := MailboxID(msg.Remote)
+			localID := MailboxID(msg.Local)
 
 			linksToRemote, remoteLinksExist := rm.linksToRemote[remoteID]
 			if remoteLinksExist {
@@ -189,7 +189,7 @@ func (rm *remoteMailboxes) Serve() {
 					continue
 				}
 			} else {
-				linksToRemote = make(map[mailboxID]voidtype)
+				linksToRemote = make(map[MailboxID]voidtype)
 				rm.linksToRemote[remoteID] = linksToRemote
 			}
 
@@ -200,7 +200,7 @@ func (rm *remoteMailboxes) Serve() {
 				err := rm.send(&internal.NotifyNodeOnTerminate{internal.IntMailboxID(remoteID)}, "termination notification")
 				if err != nil {
 					var addr Address
-					addr.id = localID
+					addr.mailboxID = localID
 					addr.connectionServer = rm.connectionServer
 					addr.Send(MailboxTerminated(remoteID))
 					// FIXME: Really? Panic?
@@ -211,8 +211,8 @@ func (rm *remoteMailboxes) Serve() {
 			linksToRemote[localID] = void
 
 		case internal.UnnotifyRemote:
-			remoteID := mailboxID(msg.Remote)
-			localID := mailboxID(msg.Local)
+			remoteID := MailboxID(msg.Remote)
+			localID := MailboxID(msg.Local)
 
 			linksToRemote, remoteLinksExist := rm.linksToRemote[remoteID]
 			if !remoteLinksExist || len(linksToRemote) == 0 {
@@ -231,7 +231,7 @@ func (rm *remoteMailboxes) Serve() {
 		case *internal.RemoteMailboxTerminated:
 			// A remote mailbox has been terminated that we indicated
 			// interest in.
-			remoteID := mailboxID(msg.IntMailboxID)
+			remoteID := MailboxID(msg.IntMailboxID)
 			links, linksExist := rm.linksToRemote[remoteID]
 			if !linksExist || len(links) == 0 {
 				continue
@@ -239,7 +239,7 @@ func (rm *remoteMailboxes) Serve() {
 
 			for subscribed := range links {
 				var addr Address
-				addr.id = subscribed
+				addr.mailboxID = subscribed
 				addr.connectionServer = rm.connectionServer
 				addr.Send(MailboxTerminated(remoteID))
 			}
@@ -249,29 +249,25 @@ func (rm *remoteMailboxes) Serve() {
 		case *internal.NotifyNodeOnTerminate:
 			// this has to be a localID, or we wouldn't be receiving this
 			// message
-			localID := mailboxID(msg.IntMailboxID)
+			localID := MailboxID(msg.IntMailboxID)
 			var addr Address
-			addr.id = localID
+			addr.mailboxID = localID
 			addr.connectionServer = rm.connectionServer
 			addr.NotifyAddressOnTerminate(rm.Address)
 
 		case *internal.RemoveNotifyNodeOnTerminate:
-			localID := mailboxID(msg.IntMailboxID)
+			localID := MailboxID(msg.IntMailboxID)
 			var addr Address
-			addr.id = localID
+			addr.mailboxID = localID
 			addr.connectionServer = rm.connectionServer
 			addr.RemoveNotifyAddress(rm.Address)
 
 		// Note this is a local mailbox.
 		case MailboxTerminated:
-			id, isRealMailbox := AddressID(msg).(mailboxID)
-			if isRealMailbox {
-				// if we are receiving this, apparently the other side wants to
-				// hear about it
-				_ = rm.send(&internal.RemoteMailboxTerminated{internal.IntMailboxID(id)}, "mailbox terminated normally")
-			} else {
-				rm.Trace("Somehow got a mailbox termination for a non-mailboxID: %#v", msg)
-			}
+			id := MailboxID(msg)
+			// if we are receiving this, apparently the other side wants to
+			// hear about it
+			_ = rm.send(&internal.RemoteMailboxTerminated{internal.IntMailboxID(id)}, "mailbox terminated normally")
 
 		// This allows us to test proper error handling, despite
 		// the fact I don't know how to panic any of the above code
