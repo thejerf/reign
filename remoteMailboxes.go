@@ -23,7 +23,7 @@ type messageSender interface {
 type remoteMailboxes struct {
 	connection messageSender
 	NodeID
-	Address
+	*Address
 	parent          *mailboxes
 	outgoingMailbox *Mailbox
 	ClusterLogger

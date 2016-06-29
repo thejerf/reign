@@ -22,14 +22,14 @@ type NetworkTestBed struct {
 	c2 *connectionServer
 
 	mailbox1_1 *Mailbox
-	addr1_1    Address
+	addr1_1    *Address
 	mailbox2_1 *Mailbox
-	addr2_1    Address
+	addr2_1    *Address
 
 	mailbox1_2 *Mailbox
-	addr1_2    Address
+	addr1_2    *Address
 	mailbox2_2 *Mailbox
-	addr2_2    Address
+	addr2_2    *Address
 
 	// These "remote" addresses are all bound to the address indicated
 	// by their suffix, from the point of view of the "other" node, so

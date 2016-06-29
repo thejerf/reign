@@ -211,7 +211,7 @@ func (a *Address) Send(m interface{}) error {
 //
 // Calling this more than once with the same address may or may not
 // cause multiple notifications to occur.
-func (a *Address) NotifyAddressOnTerminate(addr Address) {
+func (a *Address) NotifyAddressOnTerminate(addr *Address) {
 	a.getAddress().notifyAddressOnTerminate(addr)
 }
 
@@ -220,7 +220,7 @@ func (a *Address) NotifyAddressOnTerminate(addr Address) {
 //
 // This does not guarantee that you will not receive a termination
 // notification from the Address, due to race conditions.
-func (a *Address) RemoveNotifyAddress(addr Address) {
+func (a *Address) RemoveNotifyAddress(addr *Address) {
 	a.getAddress().removeNotifyAddress(addr)
 }
 
@@ -377,8 +377,8 @@ func (a *Address) String() string {
 type address interface {
 	send(interface{}) error
 
-	notifyAddressOnTerminate(Address)
-	removeNotifyAddress(Address)
+	notifyAddressOnTerminate(*Address)
+	removeNotifyAddress(*Address)
 	canBeGloballyRegistered() bool
 	getMailboxID() MailboxID
 }
@@ -400,11 +400,11 @@ func (nm noMailbox) send(interface{}) error {
 	return ErrMailboxTerminated
 }
 
-func (nm noMailbox) notifyAddressOnTerminate(target Address) {
+func (nm noMailbox) notifyAddressOnTerminate(target *Address) {
 	target.Send(MailboxTerminated(nm.MailboxID))
 }
 
-func (nm noMailbox) removeNotifyAddress(target Address) {}
+func (nm noMailbox) removeNotifyAddress(target *Address) {}
 
 func (nm noMailbox) getMailboxID() MailboxID {
 	return nm.MailboxID
@@ -434,7 +434,7 @@ func (bra boundRemoteAddress) send(message interface{}) error {
 	})
 }
 
-func (bra boundRemoteAddress) notifyAddressOnTerminate(addr Address) {
+func (bra boundRemoteAddress) notifyAddressOnTerminate(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
 	bra.remoteMailboxes.Send(internal.NotifyRemote{
@@ -443,7 +443,7 @@ func (bra boundRemoteAddress) notifyAddressOnTerminate(addr Address) {
 	})
 }
 
-func (bra boundRemoteAddress) removeNotifyAddress(addr Address) {
+func (bra boundRemoteAddress) removeNotifyAddress(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
 	bra.remoteMailboxes.Send(internal.UnnotifyRemote{
@@ -477,7 +477,7 @@ type message struct {
 	msg interface{}
 }
 
-func (m *mailboxes) newLocalMailbox() (Address, *Mailbox) {
+func (m *mailboxes) newLocalMailbox() (*Address, *Mailbox) {
 	var mutex sync.Mutex
 	cond := sync.NewCond(&mutex)
 
@@ -494,7 +494,7 @@ func (m *mailboxes) newLocalMailbox() (Address, *Mailbox) {
 		parent:                m,
 	}
 	m.registerMailbox(id, mailbox)
-	addr := Address{
+	addr := &Address{
 		mailboxID:        id,
 		connectionServer: m.connectionServer,
 		mailbox:          mailbox,
@@ -529,7 +529,7 @@ func (m *Mailbox) getMailboxID() MailboxID {
 	return m.id
 }
 
-func (m *Mailbox) notifyAddressOnTerminate(target Address) {
+func (m *Mailbox) notifyAddressOnTerminate(target *Address) {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
@@ -553,7 +553,7 @@ func (m *Mailbox) notifyAddressOnTerminate(target Address) {
 //
 // Since this is a test-only function, we only implement enough to let
 // one listen on a given address occur at a time.
-func (m *Mailbox) blockUntilNotifyStatus(target Address, desired bool) {
+func (m *Mailbox) blockUntilNotifyStatus(target *Address, desired bool) {
 	m.cond.L.Lock()
 
 	m.broadcastOnAddNotify = true
@@ -569,7 +569,7 @@ func (m *Mailbox) blockUntilNotifyStatus(target Address, desired bool) {
 	m.cond.L.Unlock()
 }
 
-func (m *Mailbox) removeNotifyAddress(target Address) {
+func (m *Mailbox) removeNotifyAddress(target *Address) {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 

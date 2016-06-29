@@ -82,7 +82,7 @@ type connectionServer struct {
 // ConnectionService provides an interface to the reign connectionServer and registry objects. It
 // inherits from suture.Service and reign.Cluster.
 type ConnectionService interface {
-	NewMailbox() (Address, *Mailbox)
+	NewMailbox() (*Address, *Mailbox)
 
 	// Inherited from suture.Service
 	Serve()
@@ -126,7 +126,7 @@ func (cs *connectionServer) Terminate() {
 // Mailbox appearing as a non-pointer-type in its code. It is a code smell
 // to have *Mailbox used as a map key; use AddressIDs instead.
 // instead.
-func (cs *connectionServer) NewMailbox() (Address, *Mailbox) {
+func (cs *connectionServer) NewMailbox() (*Address, *Mailbox) {
 	return cs.newLocalMailbox()
 }
 

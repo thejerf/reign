@@ -24,9 +24,9 @@ func (f FakeMailbox) send(_ interface{}) error {
 	return nil
 }
 
-func (f FakeMailbox) notifyAddressOnTerminate(_ Address) {}
+func (f FakeMailbox) notifyAddressOnTerminate(_ *Address) {}
 
-func (f FakeMailbox) removeNotifyAddress(_ Address) {}
+func (f FakeMailbox) removeNotifyAddress(_ *Address) {}
 
 var anything = func(i interface{}) bool {
 	return true
@@ -521,8 +521,8 @@ func TestCoverNoMailbox(t *testing.T) {
 	if nm.MailboxID != mID {
 		t.Fatal("getID incorrectly implemented for noMailbox")
 	}
-	nm.notifyAddressOnTerminate(Address{mID, nm, nil})
-	nm.removeNotifyAddress(Address{mID, nm, nil})
+	nm.notifyAddressOnTerminate(&Address{mID, nm, nil})
+	nm.removeNotifyAddress(&Address{mID, nm, nil})
 
 	// FIXME: Test marshal/unmarshal
 }
@@ -547,7 +547,7 @@ func TestCoverCanBeRegistered(t *testing.T) {
 // Cover the errors not tested by anything else
 func TestCoverAddressMarshaling(t *testing.T) {
 	connections, _ := noClustering(NullLogger)
-	a := Address{}
+	a := &Address{}
 	a.connectionServer = connections
 
 	b, err := a.MarshalBinary()
@@ -555,7 +555,7 @@ func TestCoverAddressMarshaling(t *testing.T) {
 		t.Fatalf("Wrong error from marshaling binary of empty address #%v, #%v", b, err)
 	}
 
-	a = Address{}
+	a = &Address{}
 	err = a.UnmarshalBinary([]byte("<"))
 	if err != ErrIllegalAddressFormat {
 		t.Fatal("Wrong error from unmarshaling illegal binary mailbox")
@@ -584,7 +584,7 @@ func TestCoverAddressMarshaling(t *testing.T) {
 		t.Fatal("fails to properly check registry mailboxes in text for quotes")
 	}
 
-	a = Address{}
+	a = &Address{}
 	b, err = a.MarshalText()
 	if err == nil {
 		t.Fatal("can marshal nonexistant address to Text")

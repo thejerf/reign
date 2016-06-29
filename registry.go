@@ -109,7 +109,7 @@ type registry struct {
 
 	m sync.Mutex
 
-	Address
+	*Address
 	*Mailbox
 
 	thisNode NodeID
@@ -181,10 +181,10 @@ type NamesDebugger interface {
 type Names interface {
 	GetDebugger() NamesDebugger
 	Lookup(string) *Address
-	Register(string, Address) error
+	Register(string, *Address) error
 	SeenNames(...string) []bool
 	Sync()
-	Unregister(string, Address)
+	Unregister(string, *Address)
 }
 
 // conceptually, I consider this inline with the newConnections function,
@@ -333,7 +333,7 @@ func (r *registry) Lookup(s string) *Address {
 	}
 }
 
-func (r *registry) Register(name string, addr Address) error {
+func (r *registry) Register(name string, addr *Address) error {
 	if !addr.canBeGloballyRegistered() {
 		return ErrCantGloballyRegister
 	}
@@ -347,7 +347,7 @@ func (r *registry) Register(name string, addr Address) error {
 	return nil
 }
 
-func (r *registry) Unregister(name string, addr Address) {
+func (r *registry) Unregister(name string, addr *Address) {
 	if !addr.canBeGloballyRegistered() {
 		return
 	}
