@@ -130,7 +130,7 @@ func (cs *connectionServer) NewMailbox() (Address, *Mailbox) {
 	return cs.newLocalMailbox()
 }
 
-func (cs *connectionServer) send(mID mailboxID, msg interface{}) (err error) {
+func (cs *connectionServer) send(mID MailboxID, msg interface{}) (err error) {
 	if mID.NodeID() == cs.ThisNode.ID {
 		err = cs.mailboxes.sendByID(mID, msg)
 	} else {

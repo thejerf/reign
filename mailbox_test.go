@@ -12,8 +12,8 @@ type C struct{ int }
 type D struct{ int }
 type FakeMailbox struct{}
 
-func (f FakeMailbox) getMailboxID() mailboxID {
-	return mailboxID(1337)
+func (f FakeMailbox) getMailboxID() MailboxID {
+	return MailboxID(1337)
 }
 
 func (f FakeMailbox) canBeGloballyRegistered() bool {
@@ -214,7 +214,7 @@ func TestBasicTerminate(t *testing.T) {
 	mailbox1.Terminate()
 
 	msg := mailbox2.ReceiveNext()
-	if mailboxID(msg.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(msg.(MailboxTerminated)) != addr1.mailboxID {
 		t.Fatal("Terminate did not send the right termination message")
 	}
 
@@ -225,19 +225,19 @@ func TestBasicTerminate(t *testing.T) {
 
 	addr1.NotifyAddressOnTerminate(addr2)
 	msg = mailbox2.ReceiveNext()
-	if mailboxID(msg.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(msg.(MailboxTerminated)) != addr1.mailboxID {
 		t.Fatal("Terminate did not send the right termination message for terminated mailbox")
 	}
 
 	terminatedResult := mailbox1.ReceiveNext()
-	if mailboxID(terminatedResult.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(terminatedResult.(MailboxTerminated)) != addr1.mailboxID {
 		t.Fatal("ReceiveNext from a terminated mailbox does not return MailboxTerminated properly")
 	}
 
 	addr1S, mailbox1S := connections.NewMailbox()
 	mailbox1S.Terminate()
 	terminatedResult = mailbox1S.Receive(anything)
-	if mailboxID(terminatedResult.(MailboxTerminated)) != addr1S.mailboxID {
+	if MailboxID(terminatedResult.(MailboxTerminated)) != addr1S.mailboxID {
 		t.Fatal("Receive from a terminated mailbox does not return MailboxTerminated properly")
 	}
 
@@ -289,7 +289,7 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 
 	// The end result of all this setup is that we should be able to show
 	// that the .Receive call ended up with a MailboxTerminated as its result
-	if mailboxID(result.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(result.(MailboxTerminated)) != addr1.mailboxID {
 		t.Fatal("Terminating the Receive on Terminate doesn't work")
 	}
 }
@@ -319,7 +319,7 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 
 	// The end result of all this setup is that we should be able to show
 	// that the .Receive call ended up with a MailboxTerminated as its result
-	if mailboxID(result.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(result.(MailboxTerminated)) != addr1.mailboxID {
 		t.Fatal("Terminating the ReceiveNext on Terminate doesn't work")
 	}
 }
@@ -328,7 +328,7 @@ func TestGetAddress(t *testing.T) {
 	connections, _ := noClustering(NullLogger)
 	a, _ := connections.NewMailbox()
 	// Make an invalid node ID
-	a.mailboxID = mailboxID(1337)
+	a.mailboxID = MailboxID(1337)
 	a.mailbox = nil
 	if !panics(func() { a.getAddress() }) {
 		t.Fatal("does not panic when getting a remotemailbox from a node that doesn't exist")
@@ -380,7 +380,7 @@ func TestSendByID(t *testing.T) {
 	}
 
 	addr = Address{}
-	addr.mailboxID = mailboxID(256) + mailboxID(connections.ThisNode.ID)
+	addr.mailboxID = MailboxID(256) + MailboxID(connections.ThisNode.ID)
 	addr.connectionServer = mailbox.parent.connectionServer
 	err = addr.Send("Hello")
 	if err != ErrMailboxTerminated {
@@ -438,7 +438,7 @@ func TestMarshaling(t *testing.T) {
 		t.Fatal("Address with invalid mailbox did not error on binary marshal")
 	}
 
-	mID := mailboxID(257)
+	mID := MailboxID(257)
 	connections.ThisNode.ID = mID.NodeID()
 	mailbox := &Mailbox{id: mID}
 	bin, text, s := getMarshalsAndTest(mailbox, t)
@@ -452,7 +452,7 @@ func TestMarshaling(t *testing.T) {
 		t.Fatal("mailboxID failed to String properly")
 	}
 
-	bra := boundRemoteAddress{mailboxID(257), nil}
+	bra := boundRemoteAddress{MailboxID(257), nil}
 	bin, text, s = getMarshalsAndTest(bra, t)
 	if !reflect.DeepEqual(bin, []byte{60, 0x81, 0x02}) {
 		t.Fatal("bra did not binary marshal as expected")
@@ -512,13 +512,13 @@ func TestUnmarshalAddressErrors(t *testing.T) {
 }
 
 func TestCoverNoMailbox(t *testing.T) {
-	mID := mailboxID(257)
+	mID := MailboxID(257)
 	nm := noMailbox{mID}
 
 	if nm.send(939) != ErrMailboxTerminated {
 		t.Fatal("Can send to the no mailbox somehow")
 	}
-	if nm.mailboxID != mID {
+	if nm.MailboxID != mID {
 		t.Fatal("getID incorrectly implemented for noMailbox")
 	}
 	nm.notifyAddressOnTerminate(Address{mID, nm, nil})

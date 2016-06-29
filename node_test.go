@@ -126,7 +126,7 @@ func TestHappyPathRemoteLink(t *testing.T) {
 	// if we get the terminate.
 	ntb.mailbox1_2.Terminate()
 	termNotice := ntb.mailbox1_1.ReceiveNext()
-	if mailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
+	if MailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
 		t.Fatal("Got a termination notice for the wrong mailbox.")
 	}
 }
@@ -162,7 +162,7 @@ func TestHappyPathPartialUnnotify(t *testing.T) {
 	// now, ensure that we still get notified on the remaining address
 	ntb.mailbox1_2.Terminate()
 	termNotice := ntb.mailbox1_2.ReceiveNext()
-	if mailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
+	if MailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
 		t.Fatal("didn't get the right termination notice or something:", termNotice)
 	}
 }

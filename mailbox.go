@@ -39,13 +39,13 @@ var ErrIllegalAddressFormat = errors.New("illegally-formatted address")
 var errIllegalNilSlice = errors.New("can't unmarshal nil slice into an address")
 
 // See comment in AddressID above.
-type mailboxID uint64
+type MailboxID uint64
 
-func (mID mailboxID) NodeID() NodeID {
+func (mID MailboxID) NodeID() NodeID {
 	return NodeID(uint64(mID) & 255)
 }
 
-func (mID mailboxID) mailboxOnlyID() uint64 {
+func (mID MailboxID) mailboxOnlyID() uint64 {
 	return uint64(mID >> 8)
 }
 
@@ -53,10 +53,10 @@ func (mID mailboxID) mailboxOnlyID() uint64 {
 // of when a Mailbox is being terminated, with NotifyAddressOnTerminate.
 // If you request termination notification of multiple mailboxes, this can
 // be converted to an AddressID which can be used to distinguish them.
-type MailboxTerminated mailboxID
+type MailboxTerminated MailboxID
 
 type mailboxes struct {
-	nextMailboxID mailboxID
+	nextMailboxID MailboxID
 	nodeID        NodeID
 
 	// this isn't an ideal data structure. It's enough to satisfy the author's
@@ -64,7 +64,7 @@ type mailboxes struct {
 	// rapidly enough, this could start to become a bottleneck.
 	// Still, this *is* only touched at creation and deletion of mailboxes,
 	// not on every message or anything.
-	mailboxes map[mailboxID]*Mailbox
+	mailboxes map[MailboxID]*Mailbox
 
 	connectionServer *connectionServer
 	sync.RWMutex
@@ -77,7 +77,7 @@ func newMailboxes(connectionServer *connectionServer, nodeID NodeID) *mailboxes 
 		nextMailboxID:    1,
 		nodeID:           nodeID,
 		connectionServer: connectionServer,
-		mailboxes:        make(map[mailboxID]*Mailbox),
+		mailboxes:        make(map[MailboxID]*Mailbox),
 	}
 }
 
@@ -92,10 +92,10 @@ var ErrNotLocalMailbox = errors.New("function required a local mailbox ID but th
 // by value.
 //
 // WARNING: It is not safe to use either Address or *Address for equality
-// testing or as a key in maps! Use .GetID() to obtain a AddressID, which
+// testing or as a key in maps! Use .GetID() to obtain a MailboxID, which
 // is. (Both Address and *Address are fine to store as values.)
 type Address struct {
-	mailboxID mailboxID
+	mailboxID MailboxID
 	// This is the cached Mailbox/boundRemoteAddress/noMailbox that we might have gotten previously
 	// from calling Send() on this object
 	mailbox          address
@@ -158,6 +158,11 @@ func (a *Address) getAddress() address {
 	return a.mailbox
 }
 
+// GetID returns the MailboxID of the Address
+func (a *Address) GetID() MailboxID {
+	return a.mailboxID
+}
+
 // RegisterType registers a type to be sent across the cluster.
 //
 // This wraps gob.Register, in case we ever change the encoding method.
@@ -184,7 +189,7 @@ func RegisterType(value interface{}) {
 // Erlang, we leak this internal detail a bit. I don't know if
 // that's a good idea; use with caution. (See: erlang:is_process_alive,
 // which similarly leaks out whether the process is local or not.)
-func (a Address) Send(m interface{}) error {
+func (a *Address) Send(m interface{}) error {
 	return a.getAddress().send(m)
 }
 
@@ -206,7 +211,7 @@ func (a Address) Send(m interface{}) error {
 //
 // Calling this more than once with the same address may or may not
 // cause multiple notifications to occur.
-func (a Address) NotifyAddressOnTerminate(addr Address) {
+func (a *Address) NotifyAddressOnTerminate(addr Address) {
 	a.getAddress().notifyAddressOnTerminate(addr)
 }
 
@@ -215,7 +220,7 @@ func (a Address) NotifyAddressOnTerminate(addr Address) {
 //
 // This does not guarantee that you will not receive a termination
 // notification from the Address, due to race conditions.
-func (a Address) RemoveNotifyAddress(addr Address) {
+func (a *Address) RemoveNotifyAddress(addr Address) {
 	a.getAddress().removeNotifyAddress(addr)
 }
 
@@ -225,7 +230,7 @@ func (a Address) RemoveNotifyAddress(addr Address) {
 // the same node, the unmarshalled address will be reconnected to the
 // original Mailbox. If unmarshalled on a different node, a reference to
 // the remote mailbox will be unmarshaled.
-func (a Address) MarshalBinary() ([]byte, error) {
+func (a *Address) MarshalBinary() ([]byte, error) {
 	address := a.getAddress()
 
 	switch mbox := address.(type) {
@@ -239,7 +244,7 @@ func (a Address) MarshalBinary() ([]byte, error) {
 
 	case boundRemoteAddress:
 		b := make([]byte, 10, 10)
-		written := binary.PutUvarint(b, uint64(mbox.mailboxID))
+		written := binary.PutUvarint(b, uint64(mbox.MailboxID))
 		return append([]byte("<"), b[:written]...), nil
 
 	default:
@@ -261,13 +266,13 @@ func (a *Address) UnmarshalBinary(b []byte) error {
 		if readBytes == 0 {
 			return ErrIllegalAddressFormat
 		}
-		a.mailboxID = mailboxID(id)
+		a.mailboxID = MailboxID(id)
 		return nil
 	}
 
 	if len(b) == 1 && b[0] == 88 { // capital X
 		a.mailbox = noMailbox{0}
-		a.mailboxID = mailboxID(0)
+		a.mailboxID = MailboxID(0)
 		return nil
 	}
 
@@ -282,7 +287,7 @@ func (a *Address) UnmarshalBinary(b []byte) error {
 //    if err == nil {
 //        addr.Send(...)
 //    }
-func (a *Address) UnmarshalFromID(mID mailboxID) {
+func (a *Address) UnmarshalFromID(mID MailboxID) {
 	a.mailboxID = mID
 	a.mailbox = nil
 	a.connectionServer = nil
@@ -327,13 +332,13 @@ func (a *Address) UnmarshalText(b []byte) error {
 			return ErrIllegalAddressFormat
 		}
 
-		a.mailboxID = mailboxID(mailboxIDNum<<8 + nodeID)
+		a.mailboxID = MailboxID(mailboxIDNum<<8 + nodeID)
 
 		return nil
 
 	case byte('X'):
 		a.mailbox = noMailbox{0}
-		a.mailboxID = mailboxID(0)
+		a.mailboxID = MailboxID(0)
 		return nil
 	}
 	return ErrIllegalAddressFormat
@@ -342,7 +347,7 @@ func (a *Address) UnmarshalText(b []byte) error {
 // MarshalText implements text marshalling for Addresses.
 //
 // See MarshalBinary.
-func (a Address) MarshalText() ([]byte, error) {
+func (a *Address) MarshalText() ([]byte, error) {
 	switch mbox := a.mailbox.(type) {
 	case *Mailbox:
 		ClusterID := mbox.id.NodeID()
@@ -354,8 +359,8 @@ func (a Address) MarshalText() ([]byte, error) {
 		return []byte("X"), nil
 
 	case boundRemoteAddress:
-		ClusterID := mbox.mailboxID.NodeID()
-		mailboxID := mbox.mailboxID.mailboxOnlyID()
+		ClusterID := mbox.MailboxID.NodeID()
+		mailboxID := mbox.MailboxID.mailboxOnlyID()
 		text := fmt.Sprintf("<%d:%d>", ClusterID, mailboxID)
 		return []byte(text), nil
 
@@ -364,7 +369,7 @@ func (a Address) MarshalText() ([]byte, error) {
 	}
 }
 
-func (a Address) String() string {
+func (a *Address) String() string {
 	b, _ := a.MarshalText()
 	return string(b)
 }
@@ -375,7 +380,7 @@ type address interface {
 	notifyAddressOnTerminate(Address)
 	removeNotifyAddress(Address)
 	canBeGloballyRegistered() bool
-	getMailboxID() mailboxID
+	getMailboxID() MailboxID
 }
 
 // This type is returned when unmarshalling a local address that doesn't
@@ -388,7 +393,7 @@ type address interface {
 // this should not "magically" turn into a mailbox at some point in the
 // future.
 type noMailbox struct {
-	mailboxID
+	MailboxID
 }
 
 func (nm noMailbox) send(interface{}) error {
@@ -396,13 +401,13 @@ func (nm noMailbox) send(interface{}) error {
 }
 
 func (nm noMailbox) notifyAddressOnTerminate(target Address) {
-	target.Send(MailboxTerminated(nm.mailboxID))
+	target.Send(MailboxTerminated(nm.MailboxID))
 }
 
 func (nm noMailbox) removeNotifyAddress(target Address) {}
 
-func (nm noMailbox) getMailboxID() mailboxID {
-	return nm.mailboxID
+func (nm noMailbox) getMailboxID() MailboxID {
+	return nm.MailboxID
 }
 
 func (nm noMailbox) canBeGloballyRegistered() bool {
@@ -417,14 +422,14 @@ func (nm noMailbox) canBeGloballyRegistered() bool {
 // FIXME: Too much indirection here, there's no reason not to bind this
 // directly to the target address.
 type boundRemoteAddress struct {
-	mailboxID
+	MailboxID
 	*remoteMailboxes
 }
 
 func (bra boundRemoteAddress) send(message interface{}) error {
 	// FIMXE: Have to pass along the mailboxID here.
 	return bra.remoteMailboxes.Send(internal.OutgoingMailboxMessage{
-		Target:  internal.IntMailboxID(bra.mailboxID),
+		Target:  internal.IntMailboxID(bra.MailboxID),
 		Message: message,
 	})
 }
@@ -433,7 +438,7 @@ func (bra boundRemoteAddress) notifyAddressOnTerminate(addr Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
 	bra.remoteMailboxes.Send(internal.NotifyRemote{
-		Remote: internal.IntMailboxID(bra.mailboxID),
+		Remote: internal.IntMailboxID(bra.MailboxID),
 		Local:  internal.IntMailboxID(addr.mailboxID),
 	})
 }
@@ -442,13 +447,13 @@ func (bra boundRemoteAddress) removeNotifyAddress(addr Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
 	bra.remoteMailboxes.Send(internal.UnnotifyRemote{
-		Remote: internal.IntMailboxID(bra.mailboxID),
+		Remote: internal.IntMailboxID(bra.MailboxID),
 		Local:  internal.IntMailboxID(addr.mailboxID),
 	})
 }
 
-func (bra boundRemoteAddress) getMailboxID() mailboxID {
-	return bra.mailboxID
+func (bra boundRemoteAddress) getMailboxID() MailboxID {
+	return bra.MailboxID
 }
 
 func (bra boundRemoteAddress) canBeGloballyRegistered() bool {
@@ -457,10 +462,10 @@ func (bra boundRemoteAddress) canBeGloballyRegistered() bool {
 
 // A Mailbox is what you receive messages from via Receive or RecieveNext.
 type Mailbox struct {
-	id                    mailboxID
+	id                    MailboxID
 	messages              []message
 	cond                  *sync.Cond
-	notificationAddresses map[mailboxID]struct{}
+	notificationAddresses map[MailboxID]struct{}
 	// parent and broadcastOnNotify are used only by testing, to implement the
 	// ability to block until a notification has been processed
 	parent               *mailboxes
@@ -476,9 +481,9 @@ func (m *mailboxes) newLocalMailbox() (Address, *Mailbox) {
 	var mutex sync.Mutex
 	cond := sync.NewCond(&mutex)
 
-	nextID := mailboxID(atomic.AddUint64((*uint64)(&m.nextMailboxID), 1))
+	nextID := MailboxID(atomic.AddUint64((*uint64)(&m.nextMailboxID), 1))
 	m.nextMailboxID++
-	id := nextID<<8 + mailboxID(m.nodeID)
+	id := nextID<<8 + MailboxID(m.nodeID)
 
 	mailbox := &Mailbox{
 		id:       id,
@@ -520,7 +525,7 @@ func (m *Mailbox) canBeGloballyRegistered() bool {
 	return true
 }
 
-func (m *Mailbox) getMailboxID() mailboxID {
+func (m *Mailbox) getMailboxID() MailboxID {
 	return m.id
 }
 
@@ -534,7 +539,7 @@ func (m *Mailbox) notifyAddressOnTerminate(target Address) {
 	}
 
 	if m.notificationAddresses == nil {
-		m.notificationAddresses = make(map[mailboxID]struct{})
+		m.notificationAddresses = make(map[MailboxID]struct{})
 	}
 	m.notificationAddresses[target.mailboxID] = struct{}{}
 
@@ -713,21 +718,21 @@ func (m *Mailbox) Terminate() {
 }
 
 // it is an error to call this with the same mID more than once
-func (m *mailboxes) registerMailbox(mID mailboxID, mbox *Mailbox) {
+func (m *mailboxes) registerMailbox(mID MailboxID, mbox *Mailbox) {
 	m.Lock()
 	defer m.Unlock()
 
 	m.mailboxes[mID] = mbox
 }
 
-func (m *mailboxes) unregisterMailbox(mID mailboxID) {
+func (m *mailboxes) unregisterMailbox(mID MailboxID) {
 	m.Lock()
 	defer m.Unlock()
 
 	delete(m.mailboxes, mID)
 }
 
-func (m *mailboxes) sendByID(mID mailboxID, msg interface{}) error {
+func (m *mailboxes) sendByID(mID MailboxID, msg interface{}) error {
 	mailbox, err := m.mailboxByID(mID)
 	if err != nil {
 		return err
@@ -735,7 +740,7 @@ func (m *mailboxes) sendByID(mID mailboxID, msg interface{}) error {
 	return mailbox.send(msg)
 }
 
-func (m *mailboxes) mailboxByID(mID mailboxID) (mbox *Mailbox, err error) {
+func (m *mailboxes) mailboxByID(mID MailboxID) (mbox *Mailbox, err error) {
 	if mID.NodeID() != m.nodeID {
 		err = ErrNotLocalMailbox
 		return
