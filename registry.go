@@ -406,9 +406,6 @@ func (r *registry) register(node NodeID, name string, mID mailboxID) {
 // for anyone currently waiting for a termination notice on that name
 // and send it.
 func (r *registry) unregister(node NodeID, name string, mID mailboxID) {
-	// ensure that the unregistration matches the current one before
-	// removing it. zero value for mailboxID will never match a real one
-	// by construction in newMailboxes() (where nextMailboxID starts at 1).
 	currentRegistrants, ok := r.claims[name]
 	if !ok {
 		// TODO: log error here
@@ -416,13 +413,9 @@ func (r *registry) unregister(node NodeID, name string, mID mailboxID) {
 	}
 	delete(currentRegistrants, mID)
 
-	/*if node == r.thisNode && mID.NodeID() == r.thisNode {
-		mbox, err := r.Address.connectionServer.mailboxes.mailboxByID(mID)
-		if err == nil {
-			mbox.Terminate()
-		}
-		// TODO: log an error here
-	}*/
+	if len(currentRegistrants) == 0 {
+		delete(r.claims, name)
+	}
 }
 
 // this unregisters all names associated with the given mailbox ID
