@@ -173,8 +173,11 @@ var clusterSpecLocation = flag.String("clusterspec", "", "The location of the cl
 // This configures reign to work in a no-clustering state. You can use
 // all mailbox functionality, and there will be no network activity or
 // configuration required.
-func NoClustering() {
-	setConnections(noClustering(NullLogger))
+func NoClustering() *registry {
+	c, r := noClustering(NullLogger)
+	setConnections(c)
+
+	return r
 }
 
 func setConnections(c *connectionServer) {
@@ -183,7 +186,7 @@ func setConnections(c *connectionServer) {
 	connectionsL.Unlock()
 }
 
-func noClustering(log ClusterLogger) *connectionServer {
+func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
 	nodeID := NodeID(0)
 	localNode := &NodeDefinition{
 		ID:            nodeID,
@@ -197,14 +200,14 @@ func noClustering(log ClusterLogger) *connectionServer {
 		},
 	}
 
-	connectionServer, _ := createFromSpec(clusterSpec, nodeID, log)
+	cs, r, _ = createFromSpec(clusterSpec, nodeID, log)
 
 	// .source is currently unused.
-	// connectionServer.source = func() (*ClusterSpec, error) {
+	// cs.source = func() (*ClusterSpec, error) {
 	// 	return nil, errors.New("cluster spec was hard coded, no update possible")
 	// }
 
-	return connectionServer
+	return
 }
 
 // CreateFromSpecFile is the most automated way of creating a cluster, using the
@@ -217,38 +220,40 @@ func noClustering(log ClusterLogger) *connectionServer {
 //
 // nil may be passed as the ClusterLogger, in which case the standard log.Printf
 // will be used.
-func CreateFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
+func CreateFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (suture.Service, Names, error) {
 	return createFromSpecFile(clusterSpecLocation, thisNode, log)
 }
 
-func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
-	f, err := os.Open(clusterSpecLocation)
+func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (s suture.Service, n Names, err error) {
+	var f *os.File
+	f, err = os.Open(clusterSpecLocation)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	return createFromReader(f, thisNode, log)
 }
 
 // CreateFromReader creates a cluster based on the io.Reader of your choice.
-func CreateFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
+func CreateFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (suture.Service, Names, error) {
 	return createFromReader(r, thisNode, log)
 }
 
-func createFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (*connectionServer, error) {
-	contents, err := ioutil.ReadAll(r)
+func createFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (cs *connectionServer, n Names, err error) {
+	var contents []byte
+	contents, err = ioutil.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	return createFromJSON(contents, thisNode, log)
 }
 
-func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (*connectionServer, error) {
+func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (cs *connectionServer, r *registry, err error) {
 	clusterSpec := ClusterSpec{}
-	err := json.Unmarshal(contents, &clusterSpec)
+	err = json.Unmarshal(contents, &clusterSpec)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	// since we can't trust the json decoding to produce legal values,
@@ -258,13 +263,13 @@ func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (*conne
 
 // CreateFromSpec creates a cluster directly from a *ClusterSpec, the
 // ultimate in control.
-func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
-	connectionServer, err := createFromSpec(spec, thisNode, log)
+func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (cs suture.Service, n Names, err error) {
+	cs, n, err = createFromSpec(spec, thisNode, log)
 	if err != nil {
 		// Set the global value
-		setConnections(connectionServer)
+		setConnections(cs.(*connectionServer))
 	}
-	return connectionServer, err
+	return
 }
 
 func (c *Cluster) tlsConfig(serverNode NodeID) *tls.Config {
@@ -290,9 +295,9 @@ func resolveLog(l ClusterLogger) ClusterLogger {
 // This ugly lil' wad of code takes in the cluster specification and returns
 // the actual cluster, as embedded in a connectionServer. Error handling
 // code is so droll, isn't it?
-func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*connectionServer, error) {
+func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*connectionServer, *registry, error) {
 	if connections != nil {
-		panic("Declaring cluster when cluster has already been declared.")
+		panic("Declaring cluster when cluster has already been declared")
 	}
 
 	log = resolveLog(log)
@@ -428,7 +433,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 
 	thisNodeDef, exists := cluster.Nodes[thisNode]
 	if !exists {
-		return nil, errors.New("the node claimed to be the local node is not defined")
+		return nil, nil, errors.New("the node claimed to be the local node is not defined")
 	}
 
 	// now we create the hash. This is used to verify that all cluster elements
@@ -441,7 +446,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	cluster.hash = hash.Sum64()
 
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s\n",
+		return nil, nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s\n",
 			strings.Join(errs, "\n * "),
 		)
 	}
@@ -452,7 +457,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 
 	connectionServer.Cluster = cluster
 	cluster.ThisNode = thisNodeDef
-	return connectionServer, nil
+	return connectionServer, connectionServer.registry, nil
 }
 
 // AddConnectionStatusCallback allows you to register a callback to be

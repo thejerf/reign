@@ -102,7 +102,7 @@ func TestCoverage(t *testing.T) {
 
 	var err error
 	nilConnections()
-	_, err = createFromSpec(testSpec(), 10, NullLogger)
+	_, _, err = createFromSpec(testSpec(), 10, NullLogger)
 	if err.Error() != "the node claimed to be the local node is not defined" {
 		t.Fatal("Failed to verify the claimed local node is in the cluster")
 	}

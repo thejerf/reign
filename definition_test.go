@@ -31,7 +31,7 @@ func TestJSONSpecification(t *testing.T) {
     "node_key_pem": "` + jsonbytes(node1_1_key) + `",
     "cluster_cert_pem": "` + jsonbytes(signing1_cert) + `"
 }`)
-	cluster, err := createFromJSON(validJSON, 0, NullLogger)
+	cluster, _, err := createFromJSON(validJSON, 0, NullLogger)
 	cluster.Terminate()
 	if err != nil {
 		t.Fatal("Got error constructing valid cluster:", err)
@@ -47,12 +47,12 @@ func TestJSONSpecification(t *testing.T) {
 	defer cleanup()
 
 	// Can we create from a good spec file?
-	service, err := CreateFromSpecFile(specFile, 0, NullLogger)
+	service, _, err := CreateFromSpecFile(specFile, 0, NullLogger)
 	service.(*connectionServer).Terminate()
 	if err != nil || service == nil {
 		t.Fatal("Error using CreateFromSpecFile:", err)
 	}
-	_, err = CreateFromSpecFile("doesnotexist", 0, NullLogger)
+	_, _, err = CreateFromSpecFile("doesnotexist", 0, NullLogger)
 	if err == nil {
 		t.Fatal("Can somehow successfully create a cluster from nonexistant file")
 	}
@@ -63,7 +63,7 @@ func TestJSONSpecification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err = CreateFromReader(goodReader, 0, NullLogger)
+	service, _, err = CreateFromReader(goodReader, 0, NullLogger)
 	service.(*connectionServer).Terminate()
 	if service == nil || err != nil {
 		t.Fatal("Can't create from reader properly")
@@ -72,13 +72,13 @@ func TestJSONSpecification(t *testing.T) {
 
 	// and does that fail properly?
 	badReader := FakeReader{errors.New("a wacky error")}
-	service, err = createFromReader(badReader, 0, NullLogger)
+	service, _, err = createFromReader(badReader, 0, NullLogger)
 	if err == nil || connections != nil {
 		t.Fatal("bad reader still somehow yielded a cluster")
 	}
 
 	// can we create from arbitrarily-sourced JSON?
-	service, err = createFromJSON([]byte("mogglegoogly!"), 0, NullLogger)
+	service, _, err = createFromJSON([]byte("mogglegoogly!"), 0, NullLogger)
 	if err == nil {
 		t.Fatal("Lunatic JSON still somehow produced a cluster.")
 	}
@@ -89,14 +89,14 @@ func TestJSONSpecification(t *testing.T) {
 	if err != nil {
 		t.Fatal("Unexpected marshaling problem")
 	}
-	service, err = CreateFromSpec(legalSpec, 0, NullLogger)
+	service, _, err = CreateFromSpec(legalSpec, 0, NullLogger)
 	service.(*connectionServer).Terminate()
 	if err != nil {
 		t.Fatal("Can't create straight from a spec")
 	}
 	nilConnections()
 	legalSpec.Nodes = map[string]*NodeDefinition{}
-	service, err = CreateFromSpec(legalSpec, 0, NullLogger)
+	service, _, err = CreateFromSpec(legalSpec, 0, NullLogger)
 	if err == nil {
 		t.Fatal("Can construct illegal cluster from illegal spec")
 	}
@@ -109,7 +109,7 @@ func TestJSONSpecErrors(t *testing.T) {
 	defer nilConnections()
 
 	noNodes := []byte(`{}`)
-	cluster, err := createFromJSON(noNodes, 0, NullLogger)
+	cluster, _, err := createFromJSON(noNodes, 0, NullLogger)
 
 	if cluster != nil || err == nil {
 		t.Fatal("No nodes still loaded just fine.")
@@ -135,7 +135,7 @@ func TestJSONSpecErrors(t *testing.T) {
     "node_cert_path": "` + node1_1CertFile + `",
     "cluster_cert_path": "` + clusterCert + `"
 }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 0, NullLogger)
 
 	if cluster != nil || err == nil {
 		t.Fatal("Bad data got all the errors")
@@ -148,7 +148,7 @@ func TestJSONSpecErrors(t *testing.T) {
     "node_cert_path": "alsoidontexist",
     "cluster_cert_path": "stillnotexisting"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 0, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
@@ -159,7 +159,7 @@ func TestJSONSpecErrors(t *testing.T) {
     "node_cert_pem": "mmommmo",
     "cluster_cert_pem": "not a legal pem"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 0, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
@@ -168,7 +168,7 @@ func TestJSONSpecErrors(t *testing.T) {
 	nodeErrors = []byte(`{
     "cluster_cert_pem": "` + jsonbytes(signing1_key) + `"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 0, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
@@ -177,7 +177,7 @@ func TestJSONSpecErrors(t *testing.T) {
 	nodeErrors = []byte(`{
     "cluster_cert_pem": "` + jsonbytes(signing1_cert_corrupt) + `"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 0, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
@@ -185,7 +185,7 @@ func TestJSONSpecErrors(t *testing.T) {
 	nodeErrors = []byte(`{
     "nodes": {"0": {}, "1": {}}
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 0, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}

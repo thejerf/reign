@@ -49,11 +49,6 @@ type AddressID interface {
 	// of AddressID. Internally you'll still see "mailboxID" used in
 	// various guises in a lot of places, because that's what it really is.
 
-	// isLocal returns true if this is a strictly local mailbox.
-	// if it's a registryMailbox this is always assumed false.
-	// FIXME: Probably defunct now.
-	isLocal() bool
-
 	// This is true if the address can legally be globally registered.
 	// Only local addresses can be registered.
 	canBeGloballyRegistered() bool
@@ -72,11 +67,6 @@ func (mID mailboxID) mailboxOnlyID() uint64 {
 
 func (mID mailboxID) getID() AddressID {
 	return mID
-}
-
-func (mID mailboxID) isLocal() bool {
-	nodeID := mID.NodeID()
-	return nodeID == connections.ThisNode.ID
 }
 
 func (mID mailboxID) canBeGloballyRegistered() bool {
@@ -155,7 +145,7 @@ func (a *Address) clearAddress() {
 	a.mailbox = nil
 }
 
-var rmIsAddress = registryMailbox("")
+var rmIsAddress = registryMailbox{}
 
 func (a *Address) getAddress() address {
 	if a.mailbox != nil {
@@ -307,7 +297,7 @@ func (a Address) MarshalBinary() ([]byte, error) {
 		return append([]byte("<"), b[:written]...), nil
 
 	case registryMailbox:
-		return []byte("\"" + string(mbox)), nil
+		return []byte("\"" + mbox.name), nil
 
 	default:
 		return nil, ErrIllegalAddressFormat
@@ -333,7 +323,7 @@ func (a *Address) UnmarshalBinary(b []byte) error {
 	}
 
 	if b[0] == 34 { // double-quote
-		rm := registryMailbox(string(b[1:]))
+		rm := registryMailbox{name: string(b[1:])}
 		a.id = rm
 		a.mailbox = rm
 		return nil
@@ -415,7 +405,7 @@ func (a *Address) UnmarshalText(b []byte) error {
 		if b[len(b)-1] != byte('"') {
 			return ErrIllegalAddressFormat
 		}
-		rm := registryMailbox(b[1 : len(b)-1])
+		rm := registryMailbox{name: string(b[1 : len(b)-1])}
 		a.mailbox = rm
 		a.id = rm
 		return nil
@@ -444,7 +434,7 @@ func (a Address) MarshalText() ([]byte, error) {
 		return []byte(text), nil
 
 	case registryMailbox:
-		return []byte(fmt.Sprintf("\"%s\"", string(mbox))), nil
+		return []byte(fmt.Sprintf("\"%s\"", mbox.name)), nil
 
 	default:
 		return nil, errors.New("unknown address type, internal reign error")
@@ -555,24 +545,6 @@ type message struct {
 	msg interface{}
 }
 
-// New creates a new tied pair of Address and Mailbox.
-//
-// A Mailbox MUST have .Terminate() called on it when you are done with
-// it. Otherwise termination notifications will not properly fire and
-// resources will leak.
-//
-// It is not safe to copy a Mailbox by value; client code should never have
-// Mailbox appearing as a non-pointer-type in its code. It is a code smell
-// to have *Mailbox used as a map key; use AddressIDs instead.
-// instead.
-func New() (Address, *Mailbox) {
-	c := connections
-	if c == nil {
-		panic("Can not create mailboxes before a cluster configuration has been chosen. (Consider calling reign.NoClustering.)")
-	}
-	return c.newLocalMailbox()
-}
-
 func (m *mailboxes) newLocalMailbox() (Address, *Mailbox) {
 	var mutex sync.Mutex
 	cond := sync.NewCond(&mutex)
@@ -591,8 +563,13 @@ func (m *mailboxes) newLocalMailbox() (Address, *Mailbox) {
 	}
 
 	m.registerMailbox(id, mailbox)
+	addr := Address{
+		id:               id,
+		connectionServer: m.connectionServer,
+		mailbox:          mailbox,
+	}
 
-	return Address{id, nil, mailbox}, mailbox
+	return addr, mailbox
 }
 
 func (m *Mailbox) getID() AddressID {
