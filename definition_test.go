@@ -63,6 +63,11 @@ func TestJSONSpecification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := goodReader.Close(); err != nil {
+			t.Log(err)
+		}
+	}()
 	service, _, err = CreateFromReader(goodReader, 0, NullLogger)
 	service.(*connectionServer).Terminate()
 	if service == nil || err != nil {
@@ -225,6 +230,7 @@ func tmpFile(prefix string, contents []byte) (string, func()) {
 	if tmpFile == nil || err != nil {
 		panic("Could not create tmpFile properly. Please check permissions & stuff")
 	}
+	defer tmpFile.Close()
 	l, err := tmpFile.Write(contents)
 	if err != nil {
 		panic(err)
@@ -233,7 +239,8 @@ func tmpFile(prefix string, contents []byte) (string, func()) {
 		panic("Couldn't write whole file?")
 	}
 	return tmpFile.Name(), func() {
-		err := os.Remove(tmpFile.Name())
+		n := tmpFile.Name()
+		err := os.Remove(n)
 		if err != nil {
 			panic("Couldn't remove temporary file? " + err.Error())
 		}

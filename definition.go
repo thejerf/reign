@@ -230,6 +230,7 @@ func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log Cluster
 	if err != nil {
 		return
 	}
+	defer f.Close()
 
 	return createFromReader(f, thisNode, log)
 }
