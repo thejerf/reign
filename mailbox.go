@@ -534,11 +534,12 @@ type Mailbox struct {
 	messages              []message
 	cond                  *sync.Cond
 	notificationAddresses map[AddressID]struct{}
-	terminated            bool
+
 	// used only by testing, to implement the ability to block until
 	// a notification has been processed
-	broadcastOnAddNotify bool
 	parent               *mailboxes
+	broadcastOnAddNotify bool
+	terminated           bool
 }
 
 type message struct {
