@@ -25,7 +25,10 @@ func TestWrapLoggerCoverage(t *testing.T) {
 func TestStdLoggerCoverage(t *testing.T) {
 	t.Parallel()
 
+	stdLogger{}.Trace("Testing trace coverage")
+	stdLogger{}.Info("Testing info coverage")
 	stdLogger{}.Warn("Testing warn coverage")
+	stdLogger{}.Error("Testing error coverage")
 }
 
 func TestNullLoggerCoverage(t *testing.T) {

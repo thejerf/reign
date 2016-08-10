@@ -39,6 +39,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/thejerf/reign/internal"
 )
@@ -49,12 +50,11 @@ const (
 
 // nodeConnector bundles together all of the information about how to connect
 // to a node. The actual connection is a nodeConnection. This runs as a
-// supervised servec.
+// supervised service.
 type nodeConnector struct {
 	source  *NodeDefinition
 	dest    *NodeDefinition
 	cluster *Cluster
-	cancel  bool
 	ClusterLogger
 
 	// this mailbox should never get out to the "rest" of the system.
@@ -67,30 +67,44 @@ type nodeConnector struct {
 	connectionServer *connectionServer
 	connection       *nodeConnection
 
+	cancel bool
+
 	failOnSSLHandshake     bool
 	failOnClusterHandshake bool
 }
 
-// this is the literal connection to the node.
-type nodeConnection struct {
-	conn      net.Conn
-	tls       *tls.Conn
-	rawOutput io.WriteCloser
-	rawInput  io.ReadCloser
-	output    *gob.Encoder
-	input     *gob.Decoder
+// This establishes a connection to the target node. It does NOTHING ELSE,
+// no SSL handshake, nothing.
+//
+// FIXME: Test that a node definition can't establish two connections to
+// the same node.
+func (nc *nodeConnector) connect() (*nodeConnection, error) {
+	conn, err := net.DialTCP("tcp", nc.source.localaddr, nc.dest.ipaddr)
+	if err != nil {
+		return nil, err
+	}
 
-	connectionServer *connectionServer
-	source           *NodeDefinition
-	dest             *NodeDefinition
-	ClusterLogger
-	*nodeConnector
-
-	failOnSSLHandshake     bool
-	failOnClusterHandshake bool
+	return &nodeConnection{
+		conn:                   conn,
+		rawOutput:              conn,
+		rawInput:               conn,
+		source:                 nc.source,
+		dest:                   nc.dest,
+		ClusterLogger:          nc.ClusterLogger,
+		connectionServer:       nc.connectionServer,
+		failOnSSLHandshake:     nc.failOnSSLHandshake,
+		failOnClusterHandshake: nc.failOnClusterHandshake,
+		nodeConnector:          nc,
+	}, nil
 }
 
 func (nc *nodeConnector) String() string {
+	// Since the node connector's Serve() method acquires a lock while determining
+	// if it should cancel, we need to make sure that we also acquire that lock before
+	// replying to Suture's service name inquiry.
+	nc.Lock()
+	defer nc.Unlock()
+
 	return fmt.Sprintf("nodeConnector %d -> %d", nc.source.ID, nc.dest.ID)
 }
 
@@ -131,6 +145,17 @@ func (nc *nodeConnector) Serve() {
 	// hook up the connection to the permanent message manager
 	nc.remoteMailboxes.setConnection(connection)
 	defer nc.remoteMailboxes.unsetConnection(connection)
+
+	// Sync registry mailbox ID with the remote node.
+	err = connection.registryMailboxSync()
+	if err != nil {
+		nc.Error("Could not sync registry mailbox IDs with node %v: %s", nc.dest.ID, err.Error())
+		return
+	}
+	nc.Trace("%d -> %d registry mailbox sync successful", nc.source.ID, nc.dest.ID)
+
+	// TODO: Synchronize remoteMailboxes between nodes.
+
 	// and handle all incoming messages
 	connection.handleIncomingMessages()
 }
@@ -145,6 +170,75 @@ func (nc *nodeConnector) Stop() {
 	} else {
 		nc.cancel = true
 	}
+}
+
+// this is the literal connection to the node.
+type nodeConnection struct {
+	conn      net.Conn
+	tls       *tls.Conn
+	rawOutput io.WriteCloser
+	rawInput  io.ReadCloser
+	output    *gob.Encoder
+	input     *gob.Decoder
+	pingTimer *time.Timer
+
+	connectionServer *connectionServer
+	source           *NodeDefinition
+	dest             *NodeDefinition
+	ClusterLogger
+	*nodeConnector
+
+	failOnSSLHandshake     bool
+	failOnClusterHandshake bool
+
+	// Used for testing purposes to peek in on incoming messages.
+	peekFunc func(internal.ClusterMessage)
+}
+
+// peekIncomingMessage accepts a cluster message and sends it to the
+// peekFunc(), if set.
+func (nc *nodeConnection) peekIncomingMessage(cm internal.ClusterMessage) {
+	nc.Lock()
+	defer nc.Unlock()
+
+	if nc.peekFunc == nil {
+		return
+	}
+
+	nc.peekFunc(cm)
+}
+
+// setPeekFunc accepts a function and assigns it to the node connection's
+// peekFunc field.
+func (nc *nodeConnection) setPeekFunc(pf func(internal.ClusterMessage)) {
+	nc.Lock()
+	defer nc.Unlock()
+
+	nc.peekFunc = pf
+}
+
+// resetConnectionDeadline resets the network connection's deadline to
+// the specified duration from time.Now().
+func (nc *nodeConnection) resetConnectionDeadline(d time.Duration) {
+	err := nc.conn.SetDeadline(time.Now().Add(d))
+	if err != nil {
+		nc.Error("Unable to set network connection deadline: %s", err)
+	}
+}
+
+// resetPingTimer accepts a duration and resets the node connection's
+// ping timer.  The timer is initialized if it wasn't previously set.
+func (nc *nodeConnection) resetPingTimer(d time.Duration) {
+	nc.Lock()
+	defer nc.Unlock()
+
+	if nc.pingTimer == nil {
+		nc.pingTimer = time.NewTimer(d)
+
+		return
+	}
+
+	nc.pingTimer.Reset(d)
 }
 
 func (nc *nodeConnection) terminate() {
@@ -170,31 +264,6 @@ func (nc *nodeConnection) terminate() {
 	}
 }
 
-// This establishes a connection to the target node. It does NOTHING ELSE,
-// no SSL handshake, nothing.
-//
-// FIXME: Test that a node definition can't establish two connections to
-// the same node.
-func (nc *nodeConnector) connect() (*nodeConnection, error) {
-	conn, err := net.DialTCP("tcp", nc.source.localaddr, nc.dest.ipaddr)
-	if err != nil {
-		return nil, err
-	}
-
-	return &nodeConnection{
-		conn:                   conn,
-		rawOutput:              conn,
-		rawInput:               conn,
-		source:                 nc.source,
-		dest:                   nc.dest,
-		ClusterLogger:          nc.ClusterLogger,
-		connectionServer:       nc.connectionServer,
-		failOnSSLHandshake:     nc.failOnSSLHandshake,
-		failOnClusterHandshake: nc.failOnClusterHandshake,
-		nodeConnector:          nc,
-	}, nil
-}
-
 func (nc *nodeConnection) sslHandshake() error {
 	nc.Trace("Conn to %d in sslHandshake", nc.dest.ID)
 	if nc.failOnSSLHandshake {
@@ -210,8 +279,8 @@ func (nc *nodeConnection) sslHandshake() error {
 	// produce at a controlled time.
 	nc.Trace("Conn to %d handshaking", nc.dest.ID)
 	err := tlsConn.Handshake()
-	nc.Trace("Conn to %d handshook, err: %#v", nc.dest.ID, err)
 	if err != nil {
+		nc.Trace("Conn to %d handshook, err: %#v", nc.dest.ID, err)
 		return err
 	}
 
@@ -261,22 +330,97 @@ func (nc *nodeConnection) clusterHandshake() error {
 	return nil
 }
 
+func (nc *nodeConnection) registryMailboxSync() error {
+	rm := internal.RegistryMailbox{
+		Node:      internal.IntNodeID(nc.source.ID),
+		MailboxID: internal.IntMailboxID(nc.connectionServer.registry.Address.GetID()),
+	}
+
+	err := nc.output.Encode(rm)
+	if err != nil {
+		return err
+	}
+
+	var irm internal.RegistryMailbox
+	err = nc.input.Decode(&irm)
+	if err != nil {
+		return err
+	}
+
+	nc.Trace("Received mailbox ID %x from node %d", irm.MailboxID, irm.Node)
+
+	if nc.connectionServer.registry.nodeRegistries == nil {
+		nc.connectionServer.registry.nodeRegistries = make(map[NodeID]Address)
+	}
+
+	nc.connectionServer.registry.nodeRegistries[NodeID(irm.Node)] = Address{
+		mailboxID:        MailboxID(irm.MailboxID),
+		connectionServer: nc.connectionServer,
+	}
+
+	return nil
+}
+
+// handleIncomingMessages handle replies from the remote node after this
+// node makes a successful connection.
 func (nc *nodeConnection) handleIncomingMessages() {
-	var cm internal.ClusterMessage
-	var err error
+	var (
+		cm   internal.ClusterMessage
+		err  error
+		ping internal.ClusterMessage = internal.Ping{}
+		pong internal.ClusterMessage = internal.Pong{}
+		done                         = make(chan struct{})
+	)
+	defer close(done)
 
 	nc.Trace("Connection %d -> %d in handleIncomingMessages", nc.source.ID, nc.dest.ID)
+	nc.resetConnectionDeadline(DeadlineInterval)
+
+	go func() {
+		var err error
+
+		// Send PING messages to the remote node at regular intervals.
+		// The pingTimer may never fire if messages come in more frequently
+		// than the PingInterval.
+		nc.resetPingTimer(PingInterval)
+		for {
+			select {
+			case <-nc.pingTimer.C:
+				err = nc.output.Encode(&ping)
+				if err != nil {
+					nc.Error("Attempted to ping node %d: %s", nc.dest.ID, err)
+				}
+				nc.resetPingTimer(PingInterval)
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	for err == nil {
-		// FIXME: Set read timeouts, to handle network errors
-		// FIXME: Send pings, to avoid triggering read timeouts under normal
-		// circumstances
 		err = nc.input.Decode(&cm)
 		if err == nil {
-			err = nc.nodeConnector.remoteMailboxes.Send(cm)
-			if err != nil {
-				nc.Error("Error handling message %#v:\n%#v", cm, err)
+			nc.peekIncomingMessage(cm)
+
+			// We received a message.  No need to PING the remote node.
+			nc.resetPingTimer(PingInterval)
+
+			switch cm.(type) {
+			case *internal.Ping:
+				err = nc.output.Encode(&pong)
+				if err != nil {
+					nc.Error("Attempted to pong remote node: %s", err)
+				}
+			case *internal.Pong:
+			default:
+				err = nc.nodeConnector.remoteMailboxes.Send(cm)
+				if err != nil {
+					nc.Error("Error handling message %#v:\n%#v", cm, err)
+				}
 			}
+			nc.resetConnectionDeadline(DeadlineInterval)
+		} else if err == io.EOF {
+			nc.Error("Connection to node ID %v has gone down", nc.dest.ID)
 		} else {
 			panic(fmt.Sprintf("Error decoding message: %s", err.Error()))
 		}

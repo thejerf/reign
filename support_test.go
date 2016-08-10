@@ -22,22 +22,22 @@ type NetworkTestBed struct {
 	c2 *connectionServer
 
 	mailbox1_1 *Mailbox
-	addr1_1    Address
+	addr1_1    *Address
 	mailbox2_1 *Mailbox
-	addr2_1    Address
+	addr2_1    *Address
 
 	mailbox1_2 *Mailbox
-	addr1_2    Address
+	addr1_2    *Address
 	mailbox2_2 *Mailbox
-	addr2_2    Address
+	addr2_2    *Address
 
 	// These "remote" addresses are all bound to the address indicated
 	// by their suffix, from the point of view of the "other" node, so
 	// rem1_1 indicates the 1_1 Mailbox from the point of view of node 2.
-	rem1_1 Address
-	rem1_2 Address
-	rem2_1 Address
-	rem2_2 Address
+	rem1_1 *Address
+	rem1_2 *Address
+	rem2_1 *Address
+	rem2_2 *Address
 
 	remote1to2 *remoteMailboxes
 	remote2to1 *remoteMailboxes
@@ -85,15 +85,12 @@ func (ntb *NetworkTestBed) with2(f func()) {
 
 func testSpec() *ClusterSpec {
 	return &ClusterSpec{
-		Nodes: map[string]*NodeDefinition{
-			"1": {
-				Address: "127.0.0.1:29876",
-			},
-			"2": {
-				Address: "127.0.0.1:29877",
-			},
+		Nodes: []*NodeDefinition{
+			{ID: NodeID(1), Address: "127.0.0.1:29876"},
+			{ID: NodeID(2), Address: "127.0.0.1:29877"},
 		},
-		ClusterCertPEM: string(signing1_cert),
+		PermittedProtocols: []string{"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"},
+		ClusterCertPEM:     string(signing1_cert),
 	}
 }
 
@@ -135,11 +132,23 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	ntb.addr2_2, ntb.mailbox2_2 = connections.NewMailbox()
 	ntb.addr2_2.connectionServer = ntb.c2
 
-	ntb.rem1_2 = Address{ntb.addr1_2.id, ntb.c1, nil}
-	ntb.rem2_2 = Address{ntb.addr2_2.id, ntb.c1, nil}
+	ntb.rem1_2 = &Address{
+		mailboxID:        ntb.addr1_2.mailboxID,
+		connectionServer: ntb.c1,
+	}
+	ntb.rem2_2 = &Address{
+		mailboxID:        ntb.addr2_2.mailboxID,
+		connectionServer: ntb.c1,
+	}
 
-	ntb.rem1_1 = Address{ntb.addr1_1.id, ntb.c2, nil}
-	ntb.rem2_1 = Address{ntb.addr2_1.id, ntb.c2, nil}
+	ntb.rem1_1 = &Address{
+		mailboxID:        ntb.addr1_1.mailboxID,
+		connectionServer: ntb.c2,
+	}
+	ntb.rem2_1 = &Address{
+		mailboxID:        ntb.addr2_1.mailboxID,
+		connectionServer: ntb.c2,
+	}
 
 	ntb.remote1to2 = ntb.c1.remoteMailboxes[2]
 	ntb.remote2to1 = ntb.c2.remoteMailboxes[1]

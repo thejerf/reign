@@ -5,12 +5,23 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/thejerf/reign/internal"
 )
+
+// PingInterval determines the minimum interval between PING messages.
+// Defaults to 30 seconds.
+var PingInterval = time.Second * 30
+
+// DeadlineInterval determine how long to keep the network connection open after
+// a successful read.  The net.Conn deadline value will be reset to time.Now().Add(DeadlineInterval)
+// upon each successful message read over the network.  Defaults to 5 minutes.
+var DeadlineInterval = time.Minute * 5
 
 // This file defines the listener, which listens for incoming node connections,
 // and the handler that the listeners run.
@@ -66,6 +77,16 @@ func (nl *nodeListener) waitForListen() {
 	}
 	nl.Unlock()
 	nl.Trace("Listener successfully waited for")
+}
+
+func (nl *nodeListener) String() string {
+	// Since the node listener's Serve() method acquires a lock while setting
+	// its listener, we need to make sure that we also acquire that lock before
+	// replying to Suture's service name inquiry.
+	nl.Lock()
+	defer nl.Unlock()
+
+	return fmt.Sprintf("nodeListener %d on %s", nl.node.ID, nl.node.Address)
 }
 
 func (nl *nodeListener) Serve() {
@@ -135,12 +156,34 @@ type incomingConnection struct {
 	client *NodeDefinition
 	server *NodeDefinition
 
-	// The connection we are actually using to send data
-	conn net.Conn
-	// The raw TCP connection, no matter what we're doing
-	tcpConn net.Conn
-	// The TLS connection, if any
-	tls net.Conn
+	conn      net.Conn // The connection we are actually using to send data
+	tcpConn   net.Conn // The raw TCP connection, no matter what we're doing
+	tls       net.Conn // The TLS connection, if any
+	pingTimer *time.Timer
+}
+
+// resetConnectionDeadline resets the network connection's deadline to
+// the specified duration from time.Now().
+func (ic *incomingConnection) resetConnectionDeadline(d time.Duration) {
+	err := ic.conn.SetDeadline(time.Now().Add(d))
+	if err != nil {
+		ic.Error("Unable to set network connection deadline: %s", err)
+	}
+}
+
+// resetPingTimer accepts a duration and resets the incoming connection's
+// ping timer.  The timer is initialized if it wasn't previously set.
+func (ic *incomingConnection) resetPingTimer(d time.Duration) {
+	ic.Lock()
+	defer ic.Unlock()
+
+	if ic.pingTimer == nil {
+		ic.pingTimer = time.NewTimer(d)
+
+		return
+	}
+
+	ic.pingTimer.Reset(d)
 }
 
 func (ic *incomingConnection) send(value *internal.ClusterMessage) error {
@@ -210,6 +253,17 @@ func (ic *incomingConnection) handleConnection() {
 	ic.remoteMailboxes = ic.mailboxesForNode(ic.client.ID)
 	ic.remoteMailboxes.setConnection(ic)
 	defer ic.remoteMailboxes.unsetConnection(ic)
+
+	// Sync registry mailbox ID with the remote node.
+	err = ic.registryMailboxSync()
+	if err != nil {
+		ic.Error("Could not sync registry mailbox IDs with node %v: %s", ic.client.ID, err.Error())
+		return
+	}
+	ic.Trace("Listener for %d successfully synced registry mailbox", ic.server.ID)
+
+	// TODO: Synchronize remoteMailboxes between nodes.
+
 	ic.handleIncomingMessages()
 }
 
@@ -227,8 +281,8 @@ func (ic *incomingConnection) sslHandshake() error {
 	ic.Trace("Listener for %d made the tlsConn, handshaking", ic.server.ID)
 
 	err := tls.Handshake()
-	ic.Trace("Listener for %d handshook err: %s", ic.server.ID, myString(err))
 	if err != nil {
+		ic.Trace("Listener for %d handshook err: %s", ic.server.ID, myString(err))
 		return err
 	}
 
@@ -258,10 +312,12 @@ func (ic *incomingConnection) clusterHandshake() error {
 	yourNodeID := NodeID(clientHandshake.YourNodeID)
 
 	if clientHandshake.ClusterVersion != clusterVersion {
-		ic.Warn("Remote node %d claimed unknown cluster version %v, proceding in the hope that this will all just work out somehow...", clientHandshake.MyNodeID, clientHandshake.ClusterVersion)
+		ic.Warn("Remote node %d claimed unknown cluster version %v, proceding in the hope that this will all just work out somehow...",
+			clientHandshake.MyNodeID, clientHandshake.ClusterVersion)
 	}
 	if yourNodeID != ic.nodeListener.connectionServer.Cluster.ThisNode.ID {
-		ic.Warn("The remote node (claiming ID #d) thinks I'm node #d, but I think I'm node %d. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly...", clientHandshake.MyNodeID, clientHandshake.YourNodeID, ic.nodeListener.connectionServer.Cluster.ThisNode.ID)
+		ic.Warn("The remote node (claiming ID %d) thinks I'm node %d, but I think I'm node %d. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly...",
+			clientHandshake.MyNodeID, clientHandshake.YourNodeID, ic.nodeListener.connectionServer.Cluster.ThisNode.ID)
 	}
 
 	clientNodeDefinition, exists := ic.nodeListener.connectionServer.Cluster.Nodes[myNodeID]
@@ -273,7 +329,7 @@ func (ic *incomingConnection) clusterHandshake() error {
 	myHandshake := internal.ClusterHandshake{
 		ClusterVersion: clusterVersion,
 		MyNodeID:       internal.IntNodeID(ic.nodeListener.connectionServer.Cluster.ThisNode.ID),
-		YourNodeID:     internal.IntNodeID(clientHandshake.MyNodeID),
+		YourNodeID:     clientHandshake.MyNodeID,
 	}
 	ic.output.Encode(myHandshake)
 
@@ -282,22 +338,93 @@ func (ic *incomingConnection) clusterHandshake() error {
 	return nil
 }
 
-// FIXME: compare with node.go's handleIncomingMessages, which I literally
-// copy & pasted.
+func (ic *incomingConnection) registryMailboxSync() error {
+	rm := internal.RegistryMailbox{
+		Node:      internal.IntNodeID(ic.node.ID),
+		MailboxID: internal.IntMailboxID(ic.connectionServer.registry.Address.GetID()),
+	}
+
+	err := ic.output.Encode(rm)
+	if err != nil {
+		return err
+	}
+
+	var irm internal.RegistryMailbox
+	err = ic.input.Decode(&irm)
+	if err != nil {
+		return err
+	}
+
+	ic.Trace("Received mailbox ID %x from node %d", irm.MailboxID, irm.Node)
+
+	if ic.connectionServer.registry.nodeRegistries == nil {
+		ic.connectionServer.registry.nodeRegistries = make(map[NodeID]Address)
+	}
+
+	ic.connectionServer.registry.nodeRegistries[NodeID(irm.Node)] = Address{
+		mailboxID:        MailboxID(irm.MailboxID),
+		connectionServer: ic.connectionServer,
+	}
+
+	return nil
+}
+
+// handleIncomingMessages handles messages from the remote nodes after
+// making a successful connection through this node's listener.
 func (ic *incomingConnection) handleIncomingMessages() {
-	var cm internal.ClusterMessage
-	var err error
+	var (
+		cm   internal.ClusterMessage
+		err  error
+		ping internal.ClusterMessage = internal.Ping{}
+		pong internal.ClusterMessage = internal.Pong{}
+		done                         = make(chan struct{})
+	)
+	defer close(done)
+
+	ic.resetConnectionDeadline(DeadlineInterval)
+
+	go func() {
+		// Send PING messages to the remote node at regular intervals.
+		// The pingTimer may never fire if messages come in more frequently
+		// than the PingInterval.
+		ic.resetPingTimer(PingInterval)
+
+		for {
+			select {
+			case <-ic.pingTimer.C:
+				err = ic.output.Encode(&ping)
+				if err != nil {
+					ic.Error("Attempted to ping node %d: %s", ic.client.ID, err)
+				}
+				ic.resetPingTimer(PingInterval)
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	for err == nil {
-		// FIXME: Set read timeouts, to handle network errors
-		// FIXME: Send pings, to avoid triggering read timeouts under normal
-		// circumstances
 		err = ic.input.Decode(&cm)
 		if err == nil {
-			err = ic.remoteMailboxes.Send(cm)
-			if err != nil {
-				ic.Error("Error handling message %#v:\n%#v", cm, err)
+			// We received a message.  No need to PING the remote node.
+			ic.resetPingTimer(PingInterval)
+
+			switch cm.(type) {
+			case *internal.Ping:
+				err = ic.output.Encode(&pong)
+				if err != nil {
+					ic.Error("Attempted to pong node %d: %s", ic.client.ID, err)
+				}
+			case *internal.Pong:
+			default:
+				err = ic.remoteMailboxes.Send(cm)
+				if err != nil {
+					ic.Error("Error handling message %#v:\n%#v", cm, err)
+				}
 			}
+			ic.resetConnectionDeadline(DeadlineInterval)
+		} else if err == io.EOF {
+			ic.Error("Connection to node ID %v has gone down", ic.client.ID)
 		} else {
 			panic(fmt.Sprintf("Error decoding message: %s", err.Error()))
 		}

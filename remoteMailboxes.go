@@ -23,7 +23,7 @@ type messageSender interface {
 type remoteMailboxes struct {
 	connection messageSender
 	NodeID
-	Address
+	*Address
 	parent          *mailboxes
 	outgoingMailbox *Mailbox
 	ClusterLogger
@@ -36,7 +36,7 @@ type remoteMailboxes struct {
 	// all the mailboxes are nicely sorted out for just that node,
 	// then it's the remote mailbox in question, then it's the set of
 	// local mailboxes that are subscribed to that remote mailbox.
-	linksToRemote map[mailboxID]map[mailboxID]voidtype
+	linksToRemote map[MailboxID]map[MailboxID]voidtype
 
 	// a debugging function that allows us to examine the messages flowing
 	// through
@@ -69,7 +69,8 @@ func newRemoteMailboxes(connectionServer *connectionServer, mailboxes *mailboxes
 		parent:           mailboxes,
 		NodeID:           source,
 		connectionServer: connectionServer,
-		linksToRemote:    make(map[mailboxID]map[mailboxID]voidtype)}
+		// linksToRemote maps the remote MailboxID to all locally linked MailboxIDs
+		linksToRemote: make(map[MailboxID]map[MailboxID]voidtype)}
 	rm.condition = sync.NewCond(&rm.Mutex)
 	return rm
 }
@@ -77,28 +78,31 @@ func newRemoteMailboxes(connectionServer *connectionServer, mailboxes *mailboxes
 // awaitConnection waits until the remoteMailboxs have a non-nil connection
 func (rm *remoteMailboxes) waitForConnection() {
 	rm.Lock()
+	defer rm.Unlock()
+
 	for rm.connection == nil {
 		rm.condition.Wait()
 	}
-	rm.Unlock()
 }
 
 func (rm *remoteMailboxes) setConnection(ms messageSender) {
 	rm.Lock()
+	defer rm.Unlock()
+
 	rm.connection = ms
 	if rm.connectionEstablished != nil {
 		rm.connectionEstablished()
 	}
 	rm.condition.Broadcast()
-	rm.Unlock()
 }
 
 func (rm *remoteMailboxes) unsetConnection(ms messageSender) {
 	rm.Lock()
+	defer rm.Unlock()
+
 	if rm.connection == ms {
 		rm.connection = nil
 	}
-	rm.Unlock()
 }
 
 type terminateRemoteMailbox struct{}
@@ -119,8 +123,13 @@ func (rm *remoteMailboxes) send(cm internal.ClusterMessage, desc string) error {
 	err := rm.connection.send(&cm)
 	if err != nil {
 		rm.Error("Error sending msg \"%s\": %s", desc, myString(err))
+		rm.Error("Message payload: %#v", cm)
 	}
 	return err
+}
+
+func (rm *remoteMailboxes) String() string {
+	return fmt.Sprintf("remoteMailbox %d", rm.NodeID)
 }
 
 func (rm *remoteMailboxes) Serve() {
@@ -128,13 +137,14 @@ func (rm *remoteMailboxes) Serve() {
 		for remoteID, localIDs := range rm.linksToRemote {
 			for localID := range localIDs {
 				// FIXME: sendByID?
-				var addr Address
-				addr.id = localID
-				addr.connectionServer = rm.connectionServer
+				addr := Address{
+					mailboxID:        localID,
+					connectionServer: rm.connectionServer,
+				}
 				addr.Send(MailboxTerminated(remoteID))
 			}
 		}
-		rm.linksToRemote = make(map[mailboxID]map[mailboxID]voidtype)
+		rm.linksToRemote = make(map[MailboxID]map[MailboxID]voidtype)
 
 		if r := recover(); r != nil {
 			rm.Error("While handling mailbox, got fatal error (this is a serious bug): %s", myString(r))
@@ -163,14 +173,21 @@ func (rm *remoteMailboxes) Serve() {
 
 		switch msg := m.(type) {
 		case internal.OutgoingMailboxMessage:
-			rm.send(internal.IncomingMailboxMessage{msg.Target, msg.Message}, "normal message")
+			rm.send(
+				internal.IncomingMailboxMessage{
+					Target:  msg.Target,
+					Message: msg.Message,
+				},
+				"normal message",
+			)
 
 		// all of the gob encoding stuff seems to end up with this getting
 		// an extra layer of pointer indirection added to it.
 		case *internal.IncomingMailboxMessage:
-			var addr Address
-			addr.id = mailboxID(msg.Target)
-			addr.connectionServer = rm.connectionServer
+			addr := Address{
+				mailboxID:        MailboxID(msg.Target),
+				connectionServer: rm.connectionServer,
+			}
 			addr.Send(msg.Message)
 
 		case internal.NotifyRemote:
@@ -178,8 +195,8 @@ func (rm *remoteMailboxes) Serve() {
 			// link. This will eventually be a memory leak.
 			// Unfortunately it implies we need another map of local
 			// address to their relevant entries and to subscribe to them too.
-			remoteID := mailboxID(msg.Remote)
-			localID := mailboxID(msg.Local)
+			remoteID := MailboxID(msg.Remote)
+			localID := MailboxID(msg.Local)
 
 			linksToRemote, remoteLinksExist := rm.linksToRemote[remoteID]
 			if remoteLinksExist {
@@ -189,7 +206,7 @@ func (rm *remoteMailboxes) Serve() {
 					continue
 				}
 			} else {
-				linksToRemote = make(map[mailboxID]voidtype)
+				linksToRemote = make(map[MailboxID]voidtype)
 				rm.linksToRemote[remoteID] = linksToRemote
 			}
 
@@ -197,11 +214,15 @@ func (rm *remoteMailboxes) Serve() {
 				// Since this is the first link to this particular
 				// remote mailbox we are recording, we need to send along
 				// the registration message
-				err := rm.send(&internal.NotifyNodeOnTerminate{internal.IntMailboxID(remoteID)}, "termination notification")
+				err := rm.send(
+					&internal.NotifyNodeOnTerminate{IntMailboxID: internal.IntMailboxID(remoteID)},
+					"termination notification",
+				)
 				if err != nil {
-					var addr Address
-					addr.id = localID
-					addr.connectionServer = rm.connectionServer
+					addr := Address{
+						mailboxID:        localID,
+						connectionServer: rm.connectionServer,
+					}
 					addr.Send(MailboxTerminated(remoteID))
 					// FIXME: Really? Panic?
 					panic(err)
@@ -211,8 +232,8 @@ func (rm *remoteMailboxes) Serve() {
 			linksToRemote[localID] = void
 
 		case internal.UnnotifyRemote:
-			remoteID := mailboxID(msg.Remote)
-			localID := mailboxID(msg.Local)
+			remoteID := MailboxID(msg.Remote)
+			localID := MailboxID(msg.Local)
 
 			linksToRemote, remoteLinksExist := rm.linksToRemote[remoteID]
 			if !remoteLinksExist || len(linksToRemote) == 0 {
@@ -225,22 +246,26 @@ func (rm *remoteMailboxes) Serve() {
 				// if that was the last link, we need to unregister from
 				// the remote node
 				// send does all the error handling I need here
-				_ = rm.send(&internal.RemoveNotifyNodeOnTerminate{internal.IntMailboxID(remoteID)}, "remove notify node")
+				rm.send(
+					&internal.RemoveNotifyNodeOnTerminate{IntMailboxID: internal.IntMailboxID(remoteID)},
+					"remove notify node",
+				)
 			}
 
 		case *internal.RemoteMailboxTerminated:
 			// A remote mailbox has been terminated that we indicated
 			// interest in.
-			remoteID := mailboxID(msg.IntMailboxID)
+			remoteID := MailboxID(msg.IntMailboxID)
 			links, linksExist := rm.linksToRemote[remoteID]
 			if !linksExist || len(links) == 0 {
 				continue
 			}
 
 			for subscribed := range links {
-				var addr Address
-				addr.id = subscribed
-				addr.connectionServer = rm.connectionServer
+				addr := Address{
+					mailboxID:        subscribed,
+					connectionServer: rm.connectionServer,
+				}
 				addr.Send(MailboxTerminated(remoteID))
 			}
 
@@ -249,29 +274,32 @@ func (rm *remoteMailboxes) Serve() {
 		case *internal.NotifyNodeOnTerminate:
 			// this has to be a localID, or we wouldn't be receiving this
 			// message
-			localID := mailboxID(msg.IntMailboxID)
-			var addr Address
-			addr.id = localID
-			addr.connectionServer = rm.connectionServer
+			localID := MailboxID(msg.IntMailboxID)
+			addr := Address{
+				mailboxID:        localID,
+				connectionServer: rm.connectionServer,
+			}
 			addr.NotifyAddressOnTerminate(rm.Address)
 
 		case *internal.RemoveNotifyNodeOnTerminate:
-			localID := mailboxID(msg.IntMailboxID)
-			var addr Address
-			addr.id = localID
-			addr.connectionServer = rm.connectionServer
+			localID := MailboxID(msg.IntMailboxID)
+			addr := Address{
+				mailboxID:        localID,
+				connectionServer: rm.connectionServer,
+			}
 			addr.RemoveNotifyAddress(rm.Address)
 
 		// Note this is a local mailbox.
 		case MailboxTerminated:
-			id, isRealMailbox := AddressID(msg).(mailboxID)
-			if isRealMailbox {
-				// if we are receiving this, apparently the other side wants to
-				// hear about it
-				_ = rm.send(&internal.RemoteMailboxTerminated{internal.IntMailboxID(id)}, "mailbox terminated normally")
-			} else {
-				rm.Trace("Somehow got a mailbox termination for a non-mailboxID: %#v", msg)
-			}
+			id := MailboxID(msg)
+			// if we are receiving this, apparently the other side wants to
+			// hear about it
+			_ = rm.send(
+				&internal.RemoteMailboxTerminated{
+					IntMailboxID: internal.IntMailboxID(id),
+				},
+				"mailbox terminated normally",
+			)
 
 		// This allows us to test proper error handling, despite
 		// the fact I don't know how to panic any of the above code
