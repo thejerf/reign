@@ -384,6 +384,8 @@ func (ic *incomingConnection) handleIncomingMessages() {
 	ic.resetConnectionDeadline(DeadlineInterval)
 
 	go func() {
+		var err error
+
 		// Send PING messages to the remote node at regular intervals.
 		// The pingTimer may never fire if messages come in more frequently
 		// than the PingInterval.
