@@ -32,9 +32,6 @@ func init() {
 	PingInterval = time.Second * 2
 }
 
-// timeout is the duration used for ReceiveNextTimeout() calls.
-var timeout = time.Second
-
 // this goes ahead and just lets the nodes talk over the network
 
 // This function grabs the test bed and runs basic tests on it to
@@ -135,9 +132,9 @@ func TestCoverage(t *testing.T) {
 		t.Fatal("createFromSpec does not object to double-creating connections")
 	}
 
-	var err error
-	nilConnections()
-	_, _, err = createFromSpec(testSpec(), 10, NullLogger)
+	setConnections(nil)
+
+	_, _, err := createFromSpec(testSpec(), 10, NullLogger)
 	if err != errNodeNotDefined {
 		t.Fatal("Failed to verify the claimed local node is in the cluster")
 	}

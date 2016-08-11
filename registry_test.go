@@ -8,8 +8,7 @@ import (
 
 func TestConnectionStatusCallback(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	r.connectionStatusCallback(cs.nodeID, false)
@@ -17,8 +16,7 @@ func TestConnectionStatusCallback(t *testing.T) {
 
 func TestLookup(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	addr, mbx := cs.NewMailbox()
@@ -39,8 +37,7 @@ func TestLookup(t *testing.T) {
 
 func TestConnectionStatus(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	addr, mbx := cs.NewMailbox()
@@ -80,8 +77,7 @@ func TestConnectionStatus(t *testing.T) {
 
 func TestNoServe(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	addr, mbx := cs.NewMailbox()
@@ -95,8 +91,7 @@ func TestNoServe(t *testing.T) {
 
 func TestUnregisterOnTerminate(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	go func() { r.Serve() }()
@@ -132,8 +127,7 @@ func TestUnregisterOnTerminate(t *testing.T) {
 
 func TestInternalRegisterName(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	go func() { r.Serve() }()
@@ -174,8 +168,7 @@ func TestInternalRegisterName(t *testing.T) {
 
 func TestInternalUnegisterName(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	go func() { r.Serve() }()
@@ -216,8 +209,7 @@ func TestInternalUnegisterName(t *testing.T) {
 
 func TestInternalAllNodeClaims(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 	defer r.Terminate()
 
 	go func() { r.Serve() }()

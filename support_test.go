@@ -3,7 +3,11 @@ package reign
 import (
 	"fmt"
 	"runtime"
+	"time"
 )
+
+// timeout is the duration used for ReceiveNextTimeout() calls.
+var timeout = time.Second
 
 // This file contains code that supports the tests, including:
 // * Creating various clusters and starting them up in various ways
@@ -105,12 +109,12 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 
 	spec.NodeKeyPEM = string(node2_1_key)
 	spec.NodeCertPEM = string(node2_1_cert)
-	nilConnections()
+	setConnections(nil)
 	ntb.c2, _, err = createFromSpec(spec, 2, NullLogger)
 	if err != nil {
 		panic(err)
 	}
-	nilConnections()
+	setConnections(nil)
 
 	spec.NodeKeyPEM = string(node1_1_key)
 	spec.NodeCertPEM = string(node1_1_cert)
@@ -153,7 +157,7 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	ntb.remote1to2 = ntb.c1.remoteMailboxes[2]
 	ntb.remote2to1 = ntb.c2.remoteMailboxes[1]
 
-	nilConnections()
+	setConnections(nil)
 
 	return ntb
 }
@@ -184,8 +188,4 @@ func panics(f func()) (panics bool) {
 	f()
 
 	return
-}
-
-func nilConnections() {
-	setConnections(nil)
 }

@@ -184,17 +184,7 @@ func RegisterType(value interface{}) {
 // all mailbox functionality, and there will be no network activity or
 // configuration required.
 func NoClustering() (ConnectionService, Names) {
-	c, r := noClustering(NullLogger)
-	setConnections(c)
-
-	return c, r
-}
-
-func setConnections(c *connectionServer) {
-	connectionsL.Lock()
-	defer connectionsL.Unlock()
-
-	connections = c
+	return noClustering(NullLogger)
 }
 
 func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
@@ -210,12 +200,16 @@ func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
 
 	cs, r, _ = createFromSpec(clusterSpec, nodeID, log)
 
-	// .source is currently unused.
-	// cs.source = func() (*ClusterSpec, error) {
-	// 	return nil, errors.New("cluster spec was hard coded, no update possible")
-	// }
+	setConnections(cs)
 
 	return
+}
+
+func setConnections(c *connectionServer) {
+	connectionsL.Lock()
+	defer connectionsL.Unlock()
+
+	connections = c
 }
 
 // CreateFromSpecFile is the most automated way of creating a cluster, using the

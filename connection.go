@@ -131,6 +131,8 @@ func (cs *connectionServer) Terminate() {
 	if cs.registry != nil {
 		cs.registry.Terminate()
 	}
+
+	setConnections(nil)
 }
 
 func (cs *connectionServer) send(mID MailboxID, msg interface{}) (err error) {

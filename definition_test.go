@@ -14,7 +14,7 @@ func jsonbytes(b []byte) string {
 }
 
 func TestJSONSpecification(t *testing.T) {
-	defer nilConnections()
+	defer setConnections(nil)
 
 	validJSON := []byte(`
 {
@@ -36,21 +36,18 @@ func TestJSONSpecification(t *testing.T) {
 	if err != nil {
 		t.Fatal("Got error constructing valid cluster:", err)
 	}
-	cluster.Terminate()
 
 	if cluster.hash == 0 {
 		t.Fatal("Cluster hash not set")
 	}
 
-	nilConnections()
+	cluster.Terminate()
 
 	// Test validation of certificate's common name.
-	cluster, _, err = createFromJSON(validJSON, 0, NullLogger)
+	_, _, err = createFromJSON(validJSON, 0, NullLogger)
 	if err == nil {
 		t.Fatal("Expected an error creating the cluster.")
 	}
-
-	nilConnections()
 
 	// Test the alternative creation methods
 	specFile, cleanup := tmpFile("spec_tmp_file", validJSON)
@@ -62,11 +59,11 @@ func TestJSONSpecification(t *testing.T) {
 		t.Fatal("Error using CreateFromSpecFile:", err)
 	}
 	service.Terminate()
+
 	_, _, err = CreateFromSpecFile("doesnotexist", 1, NullLogger)
 	if err == nil {
 		t.Fatal("Can somehow successfully create a cluster from nonexistant file")
 	}
-	nilConnections()
 
 	// Can we create from a reader containing a good spec file?
 	goodReader, err := os.Open(specFile)
@@ -83,17 +80,16 @@ func TestJSONSpecification(t *testing.T) {
 		t.Fatal("Can't create from reader properly")
 	}
 	service.Terminate()
-	nilConnections()
 
 	// and does that fail properly?
 	badReader := FakeReader{errors.New("a wacky error")}
-	service, _, err = createFromReader(badReader, 1, NullLogger)
+	_, _, err = createFromReader(badReader, 1, NullLogger)
 	if err == nil || connections != nil {
 		t.Fatal("bad reader still somehow yielded a cluster")
 	}
 
 	// can we create from arbitrarily-sourced JSON?
-	service, _, err = createFromJSON([]byte("mogglegoogly!"), 1, NullLogger)
+	_, _, err = createFromJSON([]byte("mogglegoogly!"), 1, NullLogger)
 	if err == nil {
 		t.Fatal("Lunatic JSON still somehow produced a cluster.")
 	}
@@ -109,7 +105,7 @@ func TestJSONSpecification(t *testing.T) {
 		t.Fatal("Can't create straight from a spec")
 	}
 	service.Terminate()
-	nilConnections()
+
 	legalSpec.Nodes = []*NodeDefinition{}
 	_, _, err = CreateFromSpec(legalSpec, 1, NullLogger)
 	if err == nil {
@@ -121,11 +117,8 @@ func TestJSONSpecification(t *testing.T) {
 func TestJSONSpecErrors(t *testing.T) {
 	t.Parallel()
 
-	defer nilConnections()
-
 	noNodes := []byte(`{}`)
 	cluster, _, err := createFromJSON(noNodes, 1, NullLogger)
-
 	if cluster != nil || err == nil {
 		t.Fatal("No nodes still loaded just fine.")
 	}
@@ -151,7 +144,6 @@ func TestJSONSpecErrors(t *testing.T) {
     "cluster_cert_path": "` + clusterCert + `"
 }`)
 	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
-
 	if cluster != nil || err == nil {
 		t.Fatal("Bad data got all the errors")
 	}
@@ -207,13 +199,12 @@ func TestJSONSpecErrors(t *testing.T) {
 }
 
 func TestCoverNoClustering(t *testing.T) {
-	nilConnections()
 	NoClustering()
-	connectionsL.Lock()
 	connections.Terminate()
-	connectionsL.Unlock()
-	nilConnections()
-	// FIXME: Ought to smoke test some mailbox stuff here.
+
+	if connections != nil {
+		t.Fatal("connections were not reset as expected")
+	}
 }
 
 func TestResolveLog(t *testing.T) {

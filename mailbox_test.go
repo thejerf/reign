@@ -32,24 +32,13 @@ var anything = func(i interface{}) bool {
 	return true
 }
 
-func unsetConnections(t *testing.T) {
-	connections.Terminate()
-	if connections.mailboxes.mailboxCount() != 0 {
-		t.Fatal("Failed to correctly clean up all mailboxes at test termination. Had:", connections.mailboxes.mailboxCount())
-	}
-
-	nilConnections()
-}
-
 func TestRegisterTypeCoverage(t *testing.T) {
 	RegisterType(t)
 }
 
 func TestMailboxReceiveNext(t *testing.T) {
-	nilConnections()
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
 	defer m.Terminate()
@@ -99,7 +88,8 @@ func TestMailboxReceiveNext(t *testing.T) {
 }
 
 func TestMailboxReceiveNextAsync(t *testing.T) {
-	connections, _ := noClustering(NullLogger)
+	cs, _ := noClustering(NullLogger)
+	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
 	defer m.Terminate()
@@ -125,8 +115,8 @@ func TestMailboxReceiveNextAsync(t *testing.T) {
 }
 
 func TestMailboxReceiveNextTimeout(t *testing.T) {
-	connections, _ := noClustering(NullLogger)
-	timeout := 200 * time.Millisecond
+	cs, _ := noClustering(NullLogger)
+	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
 	defer m.Terminate()
@@ -160,10 +150,8 @@ func TestMailboxReceiveNextTimeout(t *testing.T) {
 }
 
 func TestMailboxReceive(t *testing.T) {
-	nilConnections()
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
 	defer m.Terminate()
@@ -277,10 +265,8 @@ func TestMailboxReceive(t *testing.T) {
 }
 
 func TestBasicTerminate(t *testing.T) {
-	nilConnections()
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	addr1, mailbox1 := connections.NewMailbox()
 	addr2, mailbox2 := connections.NewMailbox()
@@ -332,8 +318,7 @@ func TestBasicTerminate(t *testing.T) {
 
 func TestAsyncTerminateOnReceive(t *testing.T) {
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	wantHello := func(i interface{}) bool {
 		iReal, isStr := i.(string)
@@ -385,8 +370,7 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 
 func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	addr1, mailbox1 := connections.NewMailbox()
 
@@ -416,7 +400,9 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 }
 
 func TestGetAddress(t *testing.T) {
-	connections, _ := noClustering(NullLogger)
+	cs, _ := noClustering(NullLogger)
+	defer cs.Terminate()
+
 	a, m := connections.NewMailbox()
 	defer m.Terminate()
 
@@ -435,8 +421,7 @@ func TestGetAddress(t *testing.T) {
 
 func TestRemoveOfNotifications(t *testing.T) {
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	addr, mailbox1 := connections.NewMailbox()
 	defer mailbox1.Terminate()
@@ -456,8 +441,7 @@ func TestRemoveOfNotifications(t *testing.T) {
 
 func TestSendByID(t *testing.T) {
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	_, mailbox := connections.NewMailbox()
 	defer mailbox.Terminate()
@@ -525,8 +509,7 @@ func getMarshalsAndTest(a address, t *testing.T) ([]byte, []byte, string) {
 
 func TestMarshaling(t *testing.T) {
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
 	defer m.Terminate()
@@ -576,8 +559,7 @@ func TestMarshaling(t *testing.T) {
 
 func TestUnmarshalAddressErrors(t *testing.T) {
 	cs, _ := noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
+	defer cs.Terminate()
 
 	a := &Address{}
 
@@ -630,7 +612,7 @@ func TestCoverNoMailbox(t *testing.T) {
 }
 
 func TestCoverNoConnections(t *testing.T) {
-	nilConnections()
+	setConnections(nil)
 
 	if !panics(func() { connections.NewMailbox() }) {
 		t.Fatal("Mailboxes can be created without connections")
@@ -657,7 +639,8 @@ func TestCoverCanBeRegistered(t *testing.T) {
 // Cover the errors not tested by anything else
 func TestCoverAddressMarshaling(t *testing.T) {
 	cs, r := noClustering(NullLogger)
-	setConnections(cs)
+	defer cs.Terminate()
+	defer r.Terminate()
 
 	a := &Address{}
 	a.connectionServer = cs
@@ -672,14 +655,6 @@ func TestCoverAddressMarshaling(t *testing.T) {
 	if err != ErrIllegalAddressFormat {
 		t.Fatal("Wrong error from unmarshaling illegal binary mailbox")
 	}
-
-	r.Terminate()
-	unsetConnections(t)
-
-	cs, r = noClustering(NullLogger)
-	setConnections(cs)
-	defer unsetConnections(t)
-	defer r.Terminate()
 
 	a, m1 := connections.NewMailbox()
 	defer m1.Terminate()
