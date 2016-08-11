@@ -39,6 +39,24 @@ var ErrIllegalAddressFormat = errors.New("illegally-formatted address")
 
 var errIllegalNilSlice = errors.New("can't unmarshal nil slice into an address")
 
+// NewMailbox creates a new tied pair of Address and Mailbox.
+//
+// A Mailbox MUST have .Terminate() called on it when you are done with
+// it. Otherwise termination notifications will not properly fire and
+// resources will leak.
+//
+// It is not safe to copy a Mailbox by value; client code should never have
+// Mailbox appearing as a non-pointer-type in its code. It is a code smell
+// to have *Mailbox used as a map key; use AddressIDs instead.
+// instead.
+func NewMailbox() (*Address, *Mailbox) {
+	c := connections
+	if c == nil {
+		panic("Can not create mailboxes before a cluster configuration has been chosen. (Consider calling reign.NoClustering.)")
+	}
+	return c.NewMailbox()
+}
+
 // MailboxID is an identifier corresponding to a mailbox.
 type MailboxID uint64
 
