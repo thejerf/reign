@@ -21,7 +21,6 @@ type messageSender interface {
 // A given instance is responsible only for maintaining communication with
 // a particular node.
 type remoteMailboxes struct {
-	connection messageSender
 	NodeID
 	*Address
 	parent          *mailboxes
@@ -45,12 +44,13 @@ type remoteMailboxes struct {
 	// are done processing
 	doneProcessing func(interface{}) bool
 
+	sync.Mutex
+	condition  *sync.Cond
+	connection messageSender
+
 	// a debugging function that allows us to see that a connection has
 	// been re-established.
 	connectionEstablished func()
-
-	sync.Mutex
-	condition *sync.Cond
 }
 
 type newExamineMessages struct {
@@ -90,6 +90,7 @@ func (rm *remoteMailboxes) setConnection(ms messageSender) {
 	defer rm.Unlock()
 
 	rm.connection = ms
+
 	if rm.connectionEstablished != nil {
 		rm.connectionEstablished()
 	}
@@ -114,12 +115,16 @@ func (rm *remoteMailboxes) Stop() {
 var errNoConnection = errors.New("no connection")
 
 func (rm *remoteMailboxes) send(cm internal.ClusterMessage, desc string) error {
+	rm.Lock()
+	defer rm.Unlock()
+
 	if rm.connection == nil {
 		if rm.ClusterLogger != nil {
 			rm.Error("Could send message \"%s\" because there's no connection", desc)
 		}
 		return errNoConnection
 	}
+
 	err := rm.connection.send(&cm)
 	if err != nil {
 		rm.Error("Error sending msg \"%s\": %s", desc, myString(err))
@@ -148,9 +153,11 @@ func (rm *remoteMailboxes) Serve() {
 
 		if r := recover(); r != nil {
 			rm.Error("While handling mailbox, got fatal error (this is a serious bug): %s", myString(r))
+			rm.Lock()
 			if rm.connection != nil {
 				rm.connection.terminate()
 			}
+			rm.Unlock()
 			panic(r)
 		}
 	}()
@@ -306,7 +313,9 @@ func (rm *remoteMailboxes) Serve() {
 		case internal.PanicHandler:
 			panic("Panicking as requested due to panic handler")
 		case internal.DestroyConnection:
+			rm.Lock()
 			rm.connection.terminate()
+			rm.Unlock()
 
 		case newExamineMessages:
 			rm.examineMessages = msg.f

@@ -275,9 +275,12 @@ func TestConnectionPanicsServer(t *testing.T) {
 	defer ntb.terminate()
 
 	c := make(chan struct{})
+
+	ntb.remote1to2.Lock()
 	ntb.remote1to2.connectionEstablished = func() {
 		c <- struct{}{}
 	}
+	ntb.remote1to2.Unlock()
 
 	ntb.remote1to2.Send(internal.PanicHandler{})
 
@@ -304,9 +307,12 @@ func TestConnectionDiesServer(t *testing.T) {
 	defer ntb.terminate()
 
 	c := make(chan struct{})
+
+	ntb.remote1to2.Lock()
 	ntb.remote1to2.connectionEstablished = func() {
 		c <- struct{}{}
 	}
+	ntb.remote1to2.Unlock()
 
 	ntb.remote1to2.Send(internal.DestroyConnection{})
 
