@@ -306,7 +306,7 @@ func resolveLog(l ClusterLogger) ClusterLogger {
 // code is so droll, isn't it?
 func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*connectionServer, *registry, error) {
 	if connections != nil {
-		panic("Declaring cluster when cluster has already been declared")
+		panic("redefining the cluster is not permitted")
 	}
 
 	log = resolveLog(log)
