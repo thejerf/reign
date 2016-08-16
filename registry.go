@@ -64,6 +64,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
 	"sync"
 
@@ -195,6 +196,10 @@ type NamesDebugger interface {
 // since this deeply depends on the order of parameters initialized in the
 // &connectionServer{} in an otherwise icky way...
 func newRegistry(cs *connectionServer, node NodeID) *registry {
+	if cs == nil {
+		panic("registry connection server cannot be nil")
+	}
+
 	r := &registry{
 		claims:         make(map[string]map[MailboxID]voidtype),
 		nodeRegistries: make(map[NodeID]Address),
@@ -247,55 +252,52 @@ func (r *registry) Serve() {
 		m := r.ReceiveNext()
 		switch msg := m.(type) {
 		case internal.RegisterName: // Received locally
-			r.m.Lock()
 			r.register(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
 
 			if NodeID(msg.Node) == r.thisNode {
 				r.toOtherNodes(msg)
 			}
-			r.m.Unlock()
 
 		case *internal.RegisterName: // Received over the socket, decoded by gob
-			r.m.Lock()
 			r.register(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
-			r.m.Unlock()
 
 		case internal.UnregisterName:
-			r.m.Lock()
 			r.unregister(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
 
 			if NodeID(msg.Node) == r.thisNode {
 				r.toOtherNodes(msg)
 			}
-			r.m.Unlock()
 
 		case *internal.UnregisterName:
-			r.m.Lock()
 			r.unregister(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
-			r.m.Unlock()
 
 			// This should only be called internally
 		case internal.UnregisterMailbox:
-			r.m.Lock()
 			r.unregisterMailbox(NodeID(msg.Node), MailboxID(msg.MailboxID))
-			r.m.Unlock()
 
 		case connectionStatus:
-			r.m.Lock()
 			// HERE: Handling this and the errors in mailbox.go
 			r.handleConnectionStatus(msg)
-			r.m.Unlock()
 
 		case internal.AllNodeClaims:
-			r.m.Lock()
 			r.handleAllNodeClaims(msg)
-			r.m.Unlock()
 
 		case synchronizeRegistry:
 			msg.ch <- void
 
 		case stopRegistry:
 			return
+
+		case MailboxTerminated:
+			// (Adam): The only scenario I've seen thus far where we receive a
+			// MailboxTerminated is when the registry's mailbox is terminated and
+			// the UnregisterMailbox message is sent to itself.  It may be more
+			// proper to prevent the UnregisterMailbox message from going out to
+			// begin with rather than catching the MailboxTerminated here.
+
+		default:
+			// TODO: Use the logger instead.
+			log.Printf("Unknown registry message of type %T: %#v\n", msg, m)
 		}
 	}
 }
@@ -418,10 +420,11 @@ func (r *registry) Unregister(name string, addr *Address) {
 	})
 }
 
-// Unregisters all names that belong to the given mailbox. This may only be done locally.
-// It will subsequently call unregister for every name associated with mID
+// UnregisterMailbox unregisters all names that belong to the given mailbox.
+// This may only be done locally.  It will subsequently call unregister() for
+// every name associated with mID.
 func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
-	if mID.NodeID() == node && node == r.thisNode {
+	if mID.NodeID() == node && node == r.thisNode && r.mailboxID != mID {
 		r.Send(internal.UnregisterMailbox{
 			Node:      internal.IntNodeID(node),
 			MailboxID: internal.IntMailboxID(mID),
@@ -429,7 +432,7 @@ func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 	}
 }
 
-// This is the internal registration function.
+// register is the internal registration function.
 func (r *registry) register(node NodeID, name string, mID MailboxID) {
 	r.m.Lock()
 	defer r.m.Unlock()
@@ -459,17 +462,18 @@ func (r *registry) register(node NodeID, name string, mID MailboxID) {
 	}
 }
 
-// this is the internal unregistration function. In the event that this
-// results in the last registry for a given name being removed, we check
-// for anyone currently waiting for a termination notice on that name
-// and send it.
+// unregister is the internal unregistration function. In the event that
+// this results in the last registry for a given name being removed, we
+// check for anyone currently waiting for a termination notice on that
+// name and send it.
 func (r *registry) unregister(node NodeID, name string, mID MailboxID) {
 	r.m.Lock()
 	defer r.m.Unlock()
 
 	currentRegistrants, ok := r.claims[name]
 	if !ok {
-		// TODO: log error here
+		// TODO: Use proper logging
+		log.Printf("Name %q not found in the registry claims", name)
 		return
 	}
 	delete(currentRegistrants, mID)
@@ -479,7 +483,7 @@ func (r *registry) unregister(node NodeID, name string, mID MailboxID) {
 	}
 }
 
-// this unregisters all names associated with the given mailbox ID
+// unregisterMailbox unregisters all names associated with the given mailbox ID
 func (r *registry) unregisterMailbox(node NodeID, mID MailboxID) {
 	// TODO: make this more efficient?
 	for name, claimants := range r.claims {

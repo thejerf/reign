@@ -9,7 +9,6 @@ import (
 func TestConnectionStatusCallback(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
 
 	r.connectionStatusCallback(cs.nodeID, false)
 }
@@ -17,17 +16,20 @@ func TestConnectionStatusCallback(t *testing.T) {
 func TestLookup(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
-
-	addr, mbx := cs.NewMailbox()
-	defer mbx.Terminate()
 
 	go func() { r.Serve() }()
 	defer r.Stop()
 
-	name := "name"
-	r.Register(name, addr)
+	addr, mbx := cs.NewMailbox()
+	defer mbx.Terminate()
+
+	name := "684910"
+	if err := r.Register(name, addr); err != nil {
+		t.Fatal(err)
+	}
+
 	r.Sync()
+
 	a := r.Lookup(name)
 	a.Send(void)
 	if _, ok := mbx.ReceiveNextAsync(); !ok {
@@ -38,21 +40,22 @@ func TestLookup(t *testing.T) {
 func TestConnectionStatus(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
-
-	addr, mbx := cs.NewMailbox()
-	defer mbx.Terminate()
 
 	go func() { r.Serve() }()
 	defer r.Stop()
+
+	addr, mbx := cs.NewMailbox()
+	defer mbx.Terminate()
 
 	// This shouldn't do anything, since connected == true
 	s := connectionStatus{cs.nodeID, true}
 	r.send(s)
 
 	// First register a mailbox
-	name := "blah"
-	r.Register(name, addr)
+	name := "684910"
+	if err := r.Register(name, addr); err != nil {
+		t.Fatal(err)
+	}
 
 	// This should unregister everything on this node.
 	s.connected = false
@@ -61,7 +64,9 @@ func TestConnectionStatus(t *testing.T) {
 
 	// Now make sure the mailbox was unregistered by re-registering with the same info (if unregister
 	// was never called, this would panic)
-	r.Register(name, addr)
+	if err := r.Register(name, addr); err != nil {
+		t.Fatal(err)
+	}
 	r.Sync()
 	addr.Send(void)
 
@@ -75,10 +80,9 @@ func TestConnectionStatus(t *testing.T) {
 	}
 }
 
-func TestNoServe(t *testing.T) {
-	cs, r := noClustering(NullLogger)
+func TestNoRegistryServe(t *testing.T) {
+	cs, _ := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
 
 	addr, mbx := cs.NewMailbox()
 	defer mbx.Terminate()
@@ -92,14 +96,18 @@ func TestNoServe(t *testing.T) {
 func TestUnregisterOnTerminate(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
 
 	go func() { r.Serve() }()
+	defer r.Stop()
+
 	addr, mbx := cs.NewMailbox()
+
 	names := []string{"blah", "blech", "blorg"}
 
 	for _, name := range names {
-		r.Register(name, addr)
+		if err := r.Register(name, addr); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r.Sync()
 
@@ -128,7 +136,6 @@ func TestUnregisterOnTerminate(t *testing.T) {
 func TestInternalRegisterName(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
 
 	go func() { r.Serve() }()
 	defer r.Stop()
@@ -166,10 +173,9 @@ func TestInternalRegisterName(t *testing.T) {
 	}
 }
 
-func TestInternalUnegisterName(t *testing.T) {
+func TestInternalUnregisterName(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
 
 	go func() { r.Serve() }()
 	defer r.Stop()
@@ -180,9 +186,7 @@ func TestInternalUnegisterName(t *testing.T) {
 	addr, mbx := cs.NewMailbox()
 	defer mbx.Terminate()
 
-	err := r.Register(name, addr)
-
-	if err != nil {
+	if err := r.Register(name, addr); err != nil {
 		t.Fatal("Initial Register should have succeeded")
 	}
 
@@ -210,13 +214,13 @@ func TestInternalUnegisterName(t *testing.T) {
 func TestInternalAllNodeClaims(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
-	defer r.Terminate()
 
 	go func() { r.Serve() }()
 	defer r.Stop()
 
 	// Make a bunch of names for the same mailbox and register them with AllNodeClaims
 	names := []string{"foo", "bar", "baz"}
+
 	addr1, mbx1 := cs.NewMailbox()
 	defer mbx1.Terminate()
 
@@ -239,7 +243,9 @@ func TestInternalAllNodeClaims(t *testing.T) {
 	defer mbx2.Terminate()
 
 	for _, name := range names {
-		r.Register(name, addr2)
+		if err := r.Register(name, addr2); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r.Sync()
 

@@ -118,11 +118,13 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 // Little tests which just get some coverage out of the way.
 func TestCoverage(t *testing.T) {
 	ntb := testbed(nil)
-	defer ntb.terminate()
 
 	if !panics(func() { newConnections(nil, NodeID(1)) }) {
 		t.Fatal("Didn't panic with bad newConnections: no cluster")
 	}
+
+	ntb.terminate()
+
 	c := &Cluster{}
 	if !panics(func() { newConnections(c, NodeID(1)) }) {
 		t.Fatal("Didn't panic with bad newConnections: no clusterlogger")
@@ -245,6 +247,8 @@ func TestHappyPathFullUnnotify(t *testing.T) {
 func TestRemoteLinkErrorPaths(t *testing.T) {
 	ntb := testbed(nil)
 	defer ntb.terminate()
+
+	setConnections(ntb.c1)
 
 	// Send the remoteMailbox a message for the wrong node. (Verified that
 	// this goes down the right code path via coverage analysis.)

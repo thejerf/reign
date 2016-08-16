@@ -200,8 +200,6 @@ func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
 
 	cs, r, _ = createFromSpec(clusterSpec, nodeID, log)
 
-	setConnections(cs)
-
 	return
 }
 
@@ -461,7 +459,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	connectionServer.Cluster = cluster
 	cluster.ThisNode = thisNodeDef
 
-	// Set the global value
+	// Set the global connection server.
 	setConnections(connectionServer)
 
 	return connectionServer, connectionServer.registry, nil

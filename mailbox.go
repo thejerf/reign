@@ -39,50 +39,6 @@ var ErrIllegalAddressFormat = errors.New("illegally-formatted address")
 
 var errIllegalNilSlice = errors.New("can't unmarshal nil slice into an address")
 
-// MailboxID is an identifier corresponding to a mailbox.
-type MailboxID uint64
-
-// NodeID returns the node ID corresponding to the current mailbox ID.
-func (mID MailboxID) NodeID() NodeID {
-	return NodeID(uint64(mID) & 255)
-}
-
-func (mID MailboxID) mailboxOnlyID() uint64 {
-	return uint64(mID >> 8)
-}
-
-// MailboxTerminated is sent to Addresses that request notification
-// of when a Mailbox is being terminated, with NotifyAddressOnTerminate.
-// If you request termination notification of multiple mailboxes, this can
-// be converted to an MailboxID which can be used to distinguish them.
-type MailboxTerminated MailboxID
-
-type mailboxes struct {
-	nextMailboxID MailboxID
-	nodeID        NodeID
-
-	// this isn't an ideal data structure. It's enough to satisfy the author's
-	// use case, but if you throw "enough" cores at this and create mailboxes
-	// rapidly enough, this could start to become a bottleneck.
-	// Still, this *is* only touched at creation and deletion of mailboxes,
-	// not on every message or anything.
-	mailboxes map[MailboxID]*Mailbox
-
-	connectionServer *connectionServer
-	sync.RWMutex
-}
-
-// Returns a new set of mailboxes. This is used by the clustering
-// code. Users would not normally call this.
-func newMailboxes(connectionServer *connectionServer, nodeID NodeID) *mailboxes {
-	return &mailboxes{
-		nextMailboxID:    1,
-		nodeID:           nodeID,
-		connectionServer: connectionServer,
-		mailboxes:        make(map[MailboxID]*Mailbox),
-	}
-}
-
 // ErrMailboxTerminated is returned when the target mailbox has (already) been
 // terminated.
 var ErrMailboxTerminated = errors.New("mailbox has been terminated")
@@ -399,6 +355,39 @@ func (a *Address) String() string {
 	return string(b)
 }
 
+// MailboxID is an identifier corresponding to a mailbox.
+type MailboxID uint64
+
+// NodeID returns the node ID corresponding to the current mailbox ID.
+func (mID MailboxID) NodeID() NodeID {
+	return NodeID(uint64(mID) & 255)
+}
+
+func (mID MailboxID) mailboxOnlyID() uint64 {
+	return uint64(mID >> 8)
+}
+
+// MailboxTerminated is sent to Addresses that request notification
+// of when a Mailbox is being terminated, with NotifyAddressOnTerminate.
+// If you request termination notification of multiple mailboxes, this can
+// be converted to an MailboxID which can be used to distinguish them.
+type MailboxTerminated MailboxID
+
+type mailboxes struct {
+	nextMailboxID MailboxID
+	nodeID        NodeID
+
+	// this isn't an ideal data structure. It's enough to satisfy the author's
+	// use case, but if you throw "enough" cores at this and create mailboxes
+	// rapidly enough, this could start to become a bottleneck.
+	// Still, this *is* only touched at creation and deletion of mailboxes,
+	// not on every message or anything.
+	mailboxes map[MailboxID]*Mailbox
+
+	connectionServer *connectionServer
+	sync.RWMutex
+}
+
 func (m *mailboxes) newLocalMailbox() (*Address, *Mailbox) {
 	var mutex sync.Mutex
 	cond := sync.NewCond(&mutex)
@@ -411,9 +400,7 @@ func (m *mailboxes) newLocalMailbox() (*Address, *Mailbox) {
 		id:       id,
 		messages: make([]message, 0, 1),
 		cond:     cond,
-		notificationAddresses: nil,
-		terminated:            false,
-		parent:                m,
+		parent:   m,
 	}
 
 	m.registerMailbox(id, mailbox)
@@ -469,6 +456,17 @@ func (m *mailboxes) mailboxCount() int {
 	defer m.RUnlock()
 
 	return len(m.mailboxes)
+}
+
+// Returns a new set of mailboxes. This is used by the clustering
+// code. Users would not normally call this.
+func newMailboxes(connectionServer *connectionServer, nodeID NodeID) *mailboxes {
+	return &mailboxes{
+		nextMailboxID:    1,
+		nodeID:           nodeID,
+		connectionServer: connectionServer,
+		mailboxes:        make(map[MailboxID]*Mailbox),
+	}
 }
 
 // A Mailbox is what you receive messages from via Receive or ReceiveNext.
