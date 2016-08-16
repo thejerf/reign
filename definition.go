@@ -268,10 +268,6 @@ func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (cs *co
 // ultimate in control.
 func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (cs ConnectionService, n Names, err error) {
 	cs, n, err = createFromSpec(spec, thisNode, log)
-	if err != nil {
-		// Set the global value
-		setConnections(cs.(*connectionServer))
-	}
 	return
 }
 
@@ -464,6 +460,10 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 
 	connectionServer.Cluster = cluster
 	cluster.ThisNode = thisNodeDef
+
+	// Set the global value
+	setConnections(connectionServer)
+
 	return connectionServer, connectionServer.registry, nil
 }
 

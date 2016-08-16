@@ -406,6 +406,12 @@ func TestGetAddress(t *testing.T) {
 	a, m := connections.NewMailbox()
 	defer m.Terminate()
 
+	a2 := Address{mailboxID: a.mailboxID}
+	a2.getAddress()
+	if a2.connectionServer == nil {
+		t.Fatal("failed to get connection server with call to getAddress()")
+	}
+
 	// Make an invalid node ID
 	a.mailboxID = MailboxID(1337)
 	a.mailbox = nil

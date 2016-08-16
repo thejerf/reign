@@ -151,6 +151,8 @@ type Names interface {
 // taking out the lock (registry.m).  Most of the functionality required can
 // be accessed through the publically-exposed (uppercase) methods.
 type registry struct {
+	m sync.Mutex
+
 	// the set of all claims understood by the local node, organized as
 	// name -> set of mailbox IDs.
 	claims map[string]map[MailboxID]voidtype
@@ -159,8 +161,6 @@ type registry struct {
 	// When a registration is made, this is the list of nodes that will
 	// receive notifications of the new address. This only has remote nodes.
 	nodeRegistries map[NodeID]Address
-
-	m sync.Mutex
 
 	*Address
 	*Mailbox
@@ -334,7 +334,9 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 		}
 	}
 
+	r.m.Lock()
 	delete(r.nodeRegistries, msg.node)
+	r.m.Unlock()
 }
 
 func (r *registry) toOtherNodes(msg interface{}) {
@@ -367,6 +369,7 @@ func (r *registry) Lookup(s string) *Address {
 
 	// Pick a random ID from our list of IDs registered to this name and return it
 	id := claimIDs[rand.Intn(len(claims))]
+
 	return &Address{
 		mailboxID:        id,
 		connectionServer: r.connectionServer,
@@ -428,6 +431,9 @@ func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 
 // This is the internal registration function.
 func (r *registry) register(node NodeID, name string, mID MailboxID) {
+	r.m.Lock()
+	defer r.m.Unlock()
+
 	nameClaimants, haveNameClaimants := r.claims[name]
 	if !haveNameClaimants {
 		nameClaimants = map[MailboxID]voidtype{}
@@ -441,9 +447,10 @@ func (r *registry) register(node NodeID, name string, mID MailboxID) {
 	if len(nameClaimants) > 1 && mID.NodeID() == r.thisNode {
 		claimants := []Address{}
 		for claimant := range nameClaimants {
-			var addr Address
-			addr.mailboxID = claimant
-			addr.connectionServer = r.connectionServer
+			addr := Address{
+				mailboxID:        claimant,
+				connectionServer: r.connectionServer,
+			}
 			claimants = append(claimants, addr)
 		}
 		for _, addr := range claimants {
@@ -457,6 +464,9 @@ func (r *registry) register(node NodeID, name string, mID MailboxID) {
 // for anyone currently waiting for a termination notice on that name
 // and send it.
 func (r *registry) unregister(node NodeID, name string, mID MailboxID) {
+	r.m.Lock()
+	defer r.m.Unlock()
+
 	currentRegistrants, ok := r.claims[name]
 	if !ok {
 		// TODO: log error here

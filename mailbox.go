@@ -112,11 +112,11 @@ type message struct {
 // is. (Both Address and *Address are fine to store as values.)
 type Address struct {
 	mailboxID MailboxID
-	// This is the cached Mailbox/boundRemoteAddress/noMailbox that we might
-	// have previously received from calling Send() on this object.
+	// mailbox is the cached Mailbox/boundRemoteAddress/noMailbox that we
+	// might have previously received from calling Send() on this object.
 	mailbox address
 
-	// This is usually left nil, and picked up off the global value.
+	// connectionServer is usually left nil, and picked up off the global value.
 	// However, in order to permit testing that simulates multiple nodes
 	// being run in one process, this can be set after an unmarshal to
 	// force an Address to use a particular connection server.
@@ -145,11 +145,14 @@ func (a *Address) getAddress() address {
 	nodeID := a.mailboxID.NodeID()
 	mailboxID := a.mailboxID
 
-	var c *connectionServer
-	if a.connectionServer != nil {
-		c = a.connectionServer
-	} else {
-		c = connections
+	if a.connectionServer == nil {
+		a.connectionServer = connections
+	}
+
+	c := a.connectionServer
+
+	if c == nil {
+		panic("connection server is nil")
 	}
 
 	// If this is a local mailbox, try to go get the local address. We have
@@ -271,7 +274,10 @@ func (a *Address) MarshalBinary() ([]byte, error) {
 
 // UnmarshalBinary implements binary unmarshalling for Addresses.
 func (a *Address) UnmarshalBinary(b []byte) error {
-	*a = Address{0, nil, nil}
+	*a = Address{
+		mailboxID:        0,
+		connectionServer: connections,
+	}
 
 	if len(b) == 0 {
 		return ErrIllegalAddressFormat
@@ -311,7 +317,10 @@ func (a *Address) UnmarshalFromID(mID MailboxID) {
 
 // UnmarshalText implements text unmarshalling for Addresses.
 func (a *Address) UnmarshalText(b []byte) error {
-	*a = Address{0, nil, nil}
+	*a = Address{
+		mailboxID:        0,
+		connectionServer: connections,
+	}
 
 	if b == nil {
 		return errIllegalNilSlice

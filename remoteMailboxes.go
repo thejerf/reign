@@ -190,6 +190,7 @@ func (rm *remoteMailboxes) Serve() {
 
 		// all of the gob encoding stuff seems to end up with this getting
 		// an extra layer of pointer indirection added to it.
+		// Edit (adam): It's because we're registering the objects as pointers with gob.
 		case *internal.IncomingMailboxMessage:
 			addr := Address{
 				mailboxID:        MailboxID(msg.Target),

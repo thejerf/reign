@@ -58,6 +58,20 @@ type voidtype struct{}
 
 var void = voidtype{}
 
+// ConnectionService provides an interface to the reign connectionServer and registry objects. It
+// inherits from suture.Service and reign.Cluster.
+type ConnectionService interface {
+	NewMailbox() (*Address, *Mailbox)
+	Terminate()
+
+	// Inherited from suture.Service
+	Serve()
+	Stop()
+
+	// Inherited from reign.Cluster
+	AddConnectionStatusCallback(f func(NodeID, bool))
+}
+
 // A connection serve manages the connections, both incoming and outgoing.
 // So it maintains a listener (if necessary), and maintains the outgoing
 // connections. This could, arguably, be named "node".
@@ -77,20 +91,6 @@ type connectionServer struct {
 	registry *registry
 
 	*Cluster
-}
-
-// ConnectionService provides an interface to the reign connectionServer and registry objects. It
-// inherits from suture.Service and reign.Cluster.
-type ConnectionService interface {
-	NewMailbox() (*Address, *Mailbox)
-	Terminate()
-
-	// Inherited from suture.Service
-	Serve()
-	Stop()
-
-	// Inherited from reign.Cluster
-	AddConnectionStatusCallback(f func(NodeID, bool))
 }
 
 // NewMailbox creates a new tied pair of Address and Mailbox.

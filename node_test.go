@@ -44,8 +44,11 @@ func TestMinimalTestBed(t *testing.T) {
 		t.Fatal("Both mailboxes have the same ID")
 	}
 
+	// Send "hello" from node 2 for address1 on node 1, destined
+	// for mailbox1 on node 1.
 	ntb.rem1_1.Send("hello")
 
+	// Receive the message in mailbox1 on node 1.
 	msg, ok := ntb.mailbox1_1.ReceiveNextTimeout(timeout)
 	if !ok {
 		t.Fatal("No message received")

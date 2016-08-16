@@ -9,7 +9,9 @@ package due to circular imports.
 */
 package internal
 
-import "encoding/gob"
+import (
+	"encoding/gob"
+)
 
 func init() {
 	var anc AllNodeClaims
