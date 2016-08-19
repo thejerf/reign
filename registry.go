@@ -64,7 +64,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"sync"
 
@@ -296,8 +295,7 @@ func (r *registry) Serve() {
 			// begin with rather than catching the MailboxTerminated here.
 
 		default:
-			// TODO: Use the logger instead.
-			log.Printf("Unknown registry message of type %T: %#v\n", msg, m)
+			r.connectionServer.ClusterLogger.Error("Unknown registry message of type %T: %#v\n", msg, m)
 		}
 	}
 }
@@ -498,8 +496,6 @@ func (r *registry) unregister(node NodeID, name string, mID MailboxID) {
 
 	currentRegistrants, ok := r.claims[name]
 	if !ok {
-		// TODO: Use proper logging
-		log.Printf("Name %q not found in the registry claims", name)
 		return
 	}
 	delete(currentRegistrants, mID)
