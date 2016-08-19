@@ -308,10 +308,36 @@ func (r *registry) Sync() {
 	<-synch
 }
 
+// generateAllNodeClaims returns a populated AllNodeClaims object suitable
+// for synchronizing mailbox claims with a remote node.
+func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
+	r.m.Lock()
+	defer r.m.Unlock()
+
+	anc := internal.AllNodeClaims{
+		Node:   internal.IntNodeID(r.connectionServer.nodeID),
+		Claims: make(map[string]map[internal.IntMailboxID]struct{}),
+	}
+
+	for name, mailboxIDs := range r.claims {
+		if _, ok := anc.Claims[name]; !ok {
+			anc.Claims[name] = make(map[internal.IntMailboxID]struct{})
+		}
+
+		for intMailbox := range mailboxIDs {
+			anc.Claims[name][internal.IntMailboxID(intMailbox)] = struct{}{}
+		}
+	}
+
+	return anc
+}
+
 func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 	node := NodeID(msg.Node)
-	for name, intMailbox := range msg.Claims {
-		r.register(node, name, MailboxID(intMailbox))
+	for name, mailboxIDs := range msg.Claims {
+		for intMailboxID := range mailboxIDs {
+			r.register(node, name, MailboxID(intMailboxID))
+		}
 	}
 }
 

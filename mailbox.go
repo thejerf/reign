@@ -782,28 +782,34 @@ type boundRemoteAddress struct {
 
 func (bra boundRemoteAddress) send(message interface{}) error {
 	// FIMXE: Have to pass along the mailboxID here.
-	return bra.remoteMailboxes.Send(internal.OutgoingMailboxMessage{
-		Target:  internal.IntMailboxID(bra.MailboxID),
-		Message: message,
-	})
+	return bra.remoteMailboxes.Send(
+		internal.OutgoingMailboxMessage{
+			Target:  internal.IntMailboxID(bra.MailboxID),
+			Message: message,
+		},
+	)
 }
 
 func (bra boundRemoteAddress) notifyAddressOnTerminate(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
-	bra.remoteMailboxes.Send(internal.NotifyRemote{
-		Remote: internal.IntMailboxID(bra.MailboxID),
-		Local:  internal.IntMailboxID(addr.mailboxID),
-	})
+	bra.remoteMailboxes.Send(
+		internal.NotifyRemote{
+			Remote: internal.IntMailboxID(bra.MailboxID),
+			Local:  internal.IntMailboxID(addr.mailboxID),
+		},
+	)
 }
 
 func (bra boundRemoteAddress) removeNotifyAddress(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
-	bra.remoteMailboxes.Send(internal.UnnotifyRemote{
-		Remote: internal.IntMailboxID(bra.MailboxID),
-		Local:  internal.IntMailboxID(addr.mailboxID),
-	})
+	bra.remoteMailboxes.Send(
+		internal.UnnotifyRemote{
+			Remote: internal.IntMailboxID(bra.MailboxID),
+			Local:  internal.IntMailboxID(addr.mailboxID),
+		},
+	)
 }
 
 func (bra boundRemoteAddress) getMailboxID() MailboxID {

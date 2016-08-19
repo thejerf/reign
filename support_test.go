@@ -130,7 +130,6 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	ntb.addr2_1.connectionServer = ntb.c1
 
 	setConnections(ntb.c2)
-	connections = ntb.c2
 	ntb.addr1_2, ntb.mailbox1_2 = connections.NewMailbox()
 	ntb.addr1_2.connectionServer = ntb.c2
 	ntb.addr2_2, ntb.mailbox2_2 = connections.NewMailbox()

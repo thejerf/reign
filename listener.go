@@ -254,15 +254,13 @@ func (ic *incomingConnection) handleConnection() {
 	ic.remoteMailboxes.setConnection(ic)
 	defer ic.remoteMailboxes.unsetConnection(ic)
 
-	// Sync registry mailbox ID with the remote node.
-	err = ic.registryMailboxSync()
+	// Synchronize registry with the remote node.
+	err = ic.registrySync()
 	if err != nil {
-		ic.Error("Could not sync registry mailbox IDs with node %v: %s", ic.client.ID, err.Error())
+		ic.Error("Could not sync registry with node %v: %s", ic.client.ID, err.Error())
 		return
 	}
-	ic.Trace("Listener for %d successfully synced registry mailbox", ic.server.ID)
-
-	// TODO: Synchronize remoteMailboxes between nodes.
+	ic.Trace("Listener for %d successfully synced registry", ic.server.ID)
 
 	ic.handleIncomingMessages()
 }
@@ -302,6 +300,7 @@ func (ic *incomingConnection) clusterHandshake() error {
 		ic.terminate()
 		return errors.New("cluster handshake simulating failure")
 	}
+
 	var clientHandshake internal.ClusterHandshake
 	err := ic.input.Decode(&clientHandshake)
 	if err != nil {
@@ -331,6 +330,7 @@ func (ic *incomingConnection) clusterHandshake() error {
 		MyNodeID:       internal.IntNodeID(ic.nodeListener.connectionServer.Cluster.ThisNode.ID),
 		YourNodeID:     clientHandshake.MyNodeID,
 	}
+
 	ic.output.Encode(myHandshake)
 
 	ic.input = gob.NewDecoder(ic.tls)
@@ -338,33 +338,40 @@ func (ic *incomingConnection) clusterHandshake() error {
 	return nil
 }
 
-func (ic *incomingConnection) registryMailboxSync() error {
-	rm := internal.RegistryMailbox{
+// registrySync sends this node's registry MailboxID and claims to the remote node.
+func (ic *incomingConnection) registrySync() error {
+	// Send our registry synchronization data to the remote node.
+	rs := internal.RegistrySync{
 		Node:      internal.IntNodeID(ic.node.ID),
 		MailboxID: internal.IntMailboxID(ic.connectionServer.registry.Address.GetID()),
+		Claims:    ic.connectionServer.registry.generateAllNodeClaims(),
 	}
-
-	err := ic.output.Encode(rm)
-	if err != nil {
+	if err := ic.output.Encode(rs); err != nil {
 		return err
 	}
 
-	var irm internal.RegistryMailbox
-	err = ic.input.Decode(&irm)
-	if err != nil {
+	// Receive the remote node's registry synchronization data.
+	var irs internal.RegistrySync
+	if err := ic.input.Decode(&irs); err != nil {
 		return err
 	}
 
-	ic.Trace("Received mailbox ID %x from node %d", irm.MailboxID, irm.Node)
+	ic.Trace("Received mailbox ID %x from node %d", irs.MailboxID, irs.Node)
 
+	// Add remote node's registry mailbox ID to the nodeRegistries map.
+	ic.connectionServer.registry.m.Lock()
 	if ic.connectionServer.registry.nodeRegistries == nil {
 		ic.connectionServer.registry.nodeRegistries = make(map[NodeID]Address)
 	}
 
-	ic.connectionServer.registry.nodeRegistries[NodeID(irm.Node)] = Address{
-		mailboxID:        MailboxID(irm.MailboxID),
+	ic.connectionServer.registry.nodeRegistries[NodeID(irs.Node)] = Address{
+		mailboxID:        MailboxID(irs.MailboxID),
 		connectionServer: ic.connectionServer,
 	}
+	ic.connectionServer.registry.m.Unlock()
+
+	// Process the remote node's registry claims.
+	ic.connectionServer.registry.handleAllNodeClaims(irs.Claims)
 
 	return nil
 }

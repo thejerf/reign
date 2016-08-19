@@ -46,41 +46,45 @@ func TestMinimalTestBed(t *testing.T) {
 
 	// Send "hello" from node 2 for address1 on node 1, destined
 	// for mailbox1 on node 1.
-	ntb.rem1_1.Send("hello")
+	m := "hello"
+	ntb.rem1_1.Send(m)
 
 	// Receive the message in mailbox1 on node 1.
 	msg, ok := ntb.mailbox1_1.ReceiveNextTimeout(timeout)
 	if !ok {
-		t.Fatal("No message received")
+		t.Fatalf("Did not receive %q message", m)
 	}
-	if msg.(string) != "hello" {
+	if msg.(string) != m {
 		t.Fatal("Could not send message between nodes for some reason")
 	}
 
-	ntb.rem1_2.Send("world")
-
+	m = "world"
+	ntb.rem1_2.Send(m)
 	msg, ok = ntb.mailbox1_2.ReceiveNextTimeout(timeout)
 	if !ok {
-		t.Fatal("No message received")
+		t.Fatalf("Did not receive %q message", m)
 	}
-	if msg.(string) != "world" {
-		t.Fatal("Did not get expected response from 'hello'")
+	if msg.(string) != m {
+		t.Fatalf("Did not receive the expected %q response", m)
 	}
 
-	ntb.rem1_2.Send("Checking 1_2")
+	m = "Checking 1_2"
+	ntb.rem1_2.Send(m)
 	msg, ok = ntb.mailbox1_2.ReceiveNextTimeout(timeout)
 	if !ok {
-		t.Fatal("No message received")
+		t.Fatalf("Did not receive %q message", m)
 	}
-	if msg.(string) != "Checking 1_2" {
+	if msg.(string) != m {
 		t.Fatal("Mailbox 1_2 is broken remotely.")
 	}
-	ntb.rem2_2.Send("Checking 2_2")
+
+	m = "Checking 2_2"
+	ntb.rem2_2.Send(m)
 	msg, ok = ntb.mailbox2_2.ReceiveNextTimeout(timeout)
 	if !ok {
-		t.Fatal("No message received")
+		t.Fatalf("Did not receive %q message", m)
 	}
-	if msg.(string) != "Checking 2_2" {
+	if msg.(string) != m {
 		t.Fatal("Mailbox 2_2 is broken remotely.")
 	}
 }

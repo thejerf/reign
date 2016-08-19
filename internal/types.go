@@ -57,7 +57,14 @@ type IntMailboxID uint64
 // AllNodeClaims is part of the internal registry's private communication.
 type AllNodeClaims struct {
 	Node   IntNodeID
-	Claims map[string]IntMailboxID
+	Claims map[string]map[IntMailboxID]struct{}
+}
+
+// RegistrySync is part of the internal registry's private communication.
+type RegistrySync struct {
+	Node      IntNodeID
+	MailboxID IntMailboxID
+	Claims    AllNodeClaims
 }
 
 // RegistryMailbox is sent between node registries to populate their
@@ -100,6 +107,8 @@ type ClusterMessage interface {
 	isClusterMessage()
 }
 
+// NotifyNodeOnTerminate is an internal message, public only for
+// gob's sake.
 type NotifyNodeOnTerminate struct {
 	IntMailboxID
 }

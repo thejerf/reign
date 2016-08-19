@@ -225,9 +225,11 @@ func TestInternalAllNodeClaims(t *testing.T) {
 	defer mbx1.Terminate()
 
 	mid := internal.IntMailboxID(mbx1.id)
-	registrationMap := make(map[string]internal.IntMailboxID)
+	registrationMap := make(map[string]map[internal.IntMailboxID]struct{})
 	for _, name := range names {
-		registrationMap[name] = mid
+		registrationMap[name] = map[internal.IntMailboxID]struct{}{
+			mid: struct{}{},
+		}
 	}
 	anc := internal.AllNodeClaims{
 		Node:   internal.IntNodeID(cs.nodeID),
