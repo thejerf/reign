@@ -381,7 +381,7 @@ func (nc *nodeConnection) handleIncomingMessages() {
 	nc.resetConnectionDeadline(DeadlineInterval)
 
 	go func() {
-		var err error
+		var pErr error
 
 		// Send PING messages to the remote node at regular intervals.
 		// The pingTimer may never fire if messages come in more frequently
@@ -390,9 +390,9 @@ func (nc *nodeConnection) handleIncomingMessages() {
 		for {
 			select {
 			case <-nc.pingTimer.C:
-				err = nc.output.Encode(&ping)
-				if err != nil {
-					nc.Error("Attempted to ping node %d: %s", nc.dest.ID, err)
+				pErr = nc.output.Encode(&ping)
+				if pErr != nil {
+					nc.Error("Attempted to ping node %d: %s", nc.dest.ID, pErr)
 				}
 				nc.resetPingTimer(PingInterval)
 			case <-done:

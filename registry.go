@@ -173,14 +173,6 @@ type connectionStatus struct {
 	connected bool
 }
 
-// registryServer abstracts out the connectionServer for the registry, allowing
-// it to be tested without setting up a full massive cluster.
-type registryServer interface {
-	getNodes() []NodeID
-	newLocalMailbox() (Address, *Mailbox)
-	AddConnectionStatusCallback(f func(NodeID, bool))
-}
-
 // NamesDebugger is an interface over the registry struct. These functions acquire locks and
 // are not supposed to be called in a production setting.
 type NamesDebugger interface {

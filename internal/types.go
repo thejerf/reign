@@ -144,6 +144,7 @@ type OutgoingMailboxMessage struct {
 
 func (omm OutgoingMailboxMessage) isClusterMessage() {}
 
+// IncomingMailboxMessage indicates the embedded message is destined for a local mailbox.
 type IncomingMailboxMessage struct {
 	Target  IntMailboxID
 	Message interface{}

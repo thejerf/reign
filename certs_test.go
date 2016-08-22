@@ -31,26 +31,26 @@ func init() {
 	wg.Add(4)
 
 	go func() {
-		signing1, _ = tls.X509KeyPair(signing1_cert, signing1_key)
+		signing1, _ = tls.X509KeyPair(signing1Cert, signing1Key)
 		wg.Done()
 	}()
 	go func() {
-		node1_1, _ = tls.X509KeyPair(node1_1_cert, node1_1_key)
+		node1_1, _ = tls.X509KeyPair(node1_1Cert, node1_1Key)
 		wg.Done()
 	}()
 	go func() {
-		node2_1, _ = tls.X509KeyPair(node2_1_cert, node2_1_key)
+		node2_1, _ = tls.X509KeyPair(node2_1Cert, node2_1Key)
 		wg.Done()
 	}()
 	go func() {
-		node3_1, _ = tls.X509KeyPair(node3_1_cert, node3_1_key)
+		node3_1, _ = tls.X509KeyPair(node3_1Cert, node3_1Key)
 		wg.Done()
 	}()
 	wg.Wait()
 }
 
 var (
-	signing1_cert = []byte(`-----BEGIN CERTIFICATE-----
+	signing1Cert = []byte(`-----BEGIN CERTIFICATE-----
 MIIB+jCCAVsCCQCtnYdHvh+CezAKBggqhkjOPQQDAjBBMQswCQYDVQQGEwJHTzEO
 MAwGA1UECAwFcmVpZ24xIjAgBgNVBAMMGVJlaWduIFNpZ25pbmcgQ2VydGlmaWNh
 dGUwHhcNMTYwNjMwMTYyMTMwWhcNMjYwNjI4MTYyMTMwWjBBMQswCQYDVQQGEwJH
@@ -66,7 +66,7 @@ M5uwm2IK8vRQ9SIXlJuA1IiUz76R7JrT7dxCfqJW
 `)
 
 	// the same as the above, with chunks just missing....
-	signing1_cert_corrupt = []byte(`-----BEGIN CERTIFICATE-----
+	signing1CertCorrupt = []byte(`-----BEGIN CERTIFICATE-----
 MIIB+TCCAWICCQDijpGZKGI2nzANBgkqhkiG9w0BAQUFADBBMQswCQYDVQQGEwJH
 TzEOMAwGA1UECAwFcmVpZ24xIjAgBgNVBAMMGVJlaWduIFNpZ25pbmcgQ2VydGlm
 aWNhdGUwHhcNMTQwMzE1MDIwNjEyWhcNMjQwMzEyMDIwNjEyWjBBMQswCQYDVQQG
@@ -79,7 +79,7 @@ APzBXDZgrBuOcTAvHkepdMME2i/ddgZVTNdQuTk=
 -----END CERTIFICATE-----
 `)
 
-	signing1_key = []byte(`-----BEGIN EC PRIVATE KEY-----
+	signing1Key = []byte(`-----BEGIN EC PRIVATE KEY-----
 MIHcAgEBBEIAUpl3sClRO7SzSaDEGxUdBNzH+kQeb3QsmFLfSRxUs4apburdH5Pg
 Ff9y4SpnSrfg1fL2iESxkXyRhC72ejOPH7KgBwYFK4EEACOhgYkDgYYABAHOSuDB
 Jm6GeGOpxakwRlf9paCeBAupf4fPpoQtE2AdGcNEDirypS//QGu8IsDAV5qCL7IF
@@ -88,7 +88,7 @@ oYBI0I8fCfFVto02hABM7eAXk/yffPSBGQESkE7MvQ4IqOdwqhGt9vu7GHrj3/h1
 -----END EC PRIVATE KEY-----
 `)
 
-	node1_1_key = []byte(`-----BEGIN EC PRIVATE KEY-----
+	node1_1Key = []byte(`-----BEGIN EC PRIVATE KEY-----
 MIHcAgEBBEIAPaAjA5bObCGlNL20Kh2/S+XcScts6uTkYr6GfelmjXTVScaHTu6N
 cudPM7qFGkluLVeO0MqZzRABNQtuqJFYSFOgBwYFK4EEACOhgYkDgYYABAGLFEZZ
 W+ZfHaV16q0CvnwlH/L9GDWHowceIl65xShbriEWqdHWwUHBTNOXpastbQFL21ld
@@ -97,7 +97,7 @@ gHpfeTVj/vHBI8AbMomzwsQL5ZgcmJGb1hvCyA8FGQ==
 -----END EC PRIVATE KEY-----
 `)
 
-	node1_1_cert = []byte(`-----BEGIN CERTIFICATE-----
+	node1_1Cert = []byte(`-----BEGIN CERTIFICATE-----
 MIIB4jCCAUMCCQCPMJphs3aCiDAKBggqhkjOPQQDAjBBMQswCQYDVQQGEwJHTzEO
 MAwGA1UECAwFcmVpZ24xIjAgBgNVBAMMGVJlaWduIFNpZ25pbmcgQ2VydGlmaWNh
 dGUwHhcNMTYwNjMwMTgzNjU2WhcNMjYwNjI4MTgzNjU2WjApMQswCQYDVQQGEwJH
@@ -112,7 +112,7 @@ IYveltLRPbilEs6syD+FqXXuPLbeI5ASRY+6pOBO/t6HbAJCAU7Jq/j/7BWOg6WO
 -----END CERTIFICATE-----
 `)
 
-	node2_1_key = []byte(`-----BEGIN EC PRIVATE KEY-----
+	node2_1Key = []byte(`-----BEGIN EC PRIVATE KEY-----
 MIHcAgEBBEIAWchz1165x0iObRD6/PlsVB0dbaIlKAGHaZIt+pLaFQ9nYGL4G+Zs
 ojLEjkfFhoDrYT/RVohlLtJXttt5rO8rby2gBwYFK4EEACOhgYkDgYYABABqKyTL
 Azj+C6QSistE7yPMmQmJ6STwKOcVDtT/Bg1owwgdYBzLwkLpqXIlMfkXXLZYGxHW
@@ -121,7 +121,7 @@ TfV7FkmRLzWqE8dEAhyge4XsY09USMOR3XwfO5+5zg==
 -----END EC PRIVATE KEY-----
 `)
 
-	node2_1_cert = []byte(`-----BEGIN CERTIFICATE-----
+	node2_1Cert = []byte(`-----BEGIN CERTIFICATE-----
 MIIB4jCCAUMCCQCPMJphs3aCiTAKBggqhkjOPQQDAjBBMQswCQYDVQQGEwJHTzEO
 MAwGA1UECAwFcmVpZ24xIjAgBgNVBAMMGVJlaWduIFNpZ25pbmcgQ2VydGlmaWNh
 dGUwHhcNMTYwNjMwMTgzNjU2WhcNMjYwNjI4MTgzNjU2WjApMQswCQYDVQQGEwJH
@@ -136,7 +136,7 @@ KU3JVfcoLqALcYyS8kwHyCrX30MyZ838tcYNxqQcil2ungJCAKzu2dAEZfmXXllW
 -----END CERTIFICATE-----
 `)
 
-	node3_1_key = []byte(`-----BEGIN EC PRIVATE KEY-----
+	node3_1Key = []byte(`-----BEGIN EC PRIVATE KEY-----
 MIHcAgEBBEIAEu8ytoDNa4h19KvnEdcUdwIa5JCC+9OTeOZLTwZHkBHqPYnrPO76
 cbolzDH+c2qmLKBobxyYYURKOoYPfJGGHaugBwYFK4EEACOhgYkDgYYABAEgqQWE
 2x7GOfL4IQy8EW/99DpjnrHtC3C8M6EMxvF+x84FM5/vuI/0Gj7j3DbgZTi/tHfG
@@ -145,7 +145,7 @@ IoE6Gn+sFutSir9HGKw16TZAblGwm37tEKUYEQpq+g==
 -----END EC PRIVATE KEY-----
 `)
 
-	node3_1_cert = []byte(`-----BEGIN CERTIFICATE-----
+	node3_1Cert = []byte(`-----BEGIN CERTIFICATE-----
 MIIB4TCCAUMCCQCPMJphs3aCijAKBggqhkjOPQQDAjBBMQswCQYDVQQGEwJHTzEO
 MAwGA1UECAwFcmVpZ24xIjAgBgNVBAMMGVJlaWduIFNpZ25pbmcgQ2VydGlmaWNh
 dGUwHhcNMTYwNjMwMTgzNzExWhcNMjYwNjI4MTgzNzExWjApMQswCQYDVQQGEwJH

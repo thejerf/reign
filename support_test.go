@@ -94,7 +94,7 @@ func testSpec() *ClusterSpec {
 			{ID: NodeID(2), Address: "127.0.0.1:29877"},
 		},
 		PermittedProtocols: []string{"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"},
-		ClusterCertPEM:     string(signing1_cert),
+		ClusterCertPEM:     string(signing1Cert),
 	}
 }
 
@@ -107,8 +107,8 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 
 	var err error
 
-	spec.NodeKeyPEM = string(node2_1_key)
-	spec.NodeCertPEM = string(node2_1_cert)
+	spec.NodeKeyPEM = string(node2_1Key)
+	spec.NodeCertPEM = string(node2_1Cert)
 	setConnections(nil)
 	ntb.c2, _, err = createFromSpec(spec, 2, NullLogger)
 	if err != nil {
@@ -116,8 +116,8 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	}
 	setConnections(nil)
 
-	spec.NodeKeyPEM = string(node1_1_key)
-	spec.NodeCertPEM = string(node1_1_cert)
+	spec.NodeKeyPEM = string(node1_1Key)
+	spec.NodeCertPEM = string(node1_1Cert)
 	ntb.c1, _, err = createFromSpec(spec, 1, NullLogger)
 	if err != nil {
 		panic(err)

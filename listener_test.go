@@ -84,7 +84,7 @@ func TestNodeListenerErrors(t *testing.T) {
 		terminated <- struct{}{}
 	}()
 	nl.waitForListen()
-	nl.String() // should not block
+	_ = nl.String() // should not block
 	nl.listener.Close()
 	<-terminated
 }

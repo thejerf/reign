@@ -28,9 +28,9 @@ func TestJSONSpecification(t *testing.T) {
 			"listen_address": "192.18.28.22:90"
         }
 	],
-	"node_cert_pem": "` + jsonbytes(node1_1_cert) + `",
-	"node_key_pem": "` + jsonbytes(node1_1_key) + `",
-	"cluster_cert_pem": "` + jsonbytes(signing1_cert) + `"
+	"node_cert_pem": "` + jsonbytes(node1_1Cert) + `",
+	"node_key_pem": "` + jsonbytes(node1_1Key) + `",
+	"cluster_cert_pem": "` + jsonbytes(signing1Cert) + `"
 }`)
 	cluster, _, err := createFromJSON(validJSON, 1, NullLogger)
 	if err != nil {
@@ -71,8 +71,8 @@ func TestJSONSpecification(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := goodReader.Close(); err != nil {
-			t.Log(err)
+		if cErr := goodReader.Close(); cErr != nil {
+			t.Log(cErr)
 		}
 	}()
 	service, _, err = CreateFromReader(goodReader, 1, NullLogger)
@@ -123,11 +123,11 @@ func TestJSONSpecErrors(t *testing.T) {
 		t.Fatal("No nodes still loaded just fine.")
 	}
 
-	node1_1CertFile, cleanup := tmpFile("test_node_cert", node1_1_cert)
+	node1_1CertFile, cleanup := tmpFile("test_node_cert", node1_1Cert)
 	defer cleanup()
-	node1_1KeyFile, cleanup := tmpFile("test_node_key", node1_1_key)
+	node1_1KeyFile, cleanup := tmpFile("test_node_key", node1_1Key)
 	defer cleanup()
-	clusterCert, cleanup := tmpFile("test_cluster_cert", signing1_cert)
+	clusterCert, cleanup := tmpFile("test_cluster_cert", signing1Cert)
 	defer cleanup()
 
 	nodeErrors := []byte(`{
@@ -173,7 +173,7 @@ func TestJSONSpecErrors(t *testing.T) {
 
 	// cluster pems can fail in additional ways
 	nodeErrors = []byte(`{
-    "cluster_cert_pem": "` + jsonbytes(signing1_key) + `"
+    "cluster_cert_pem": "` + jsonbytes(signing1Key) + `"
     }`)
 	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {
@@ -182,7 +182,7 @@ func TestJSONSpecErrors(t *testing.T) {
 
 	// illegal cert
 	nodeErrors = []byte(`{
-    "cluster_cert_pem": "` + jsonbytes(signing1_cert_corrupt) + `"
+    "cluster_cert_pem": "` + jsonbytes(signing1CertCorrupt) + `"
     }`)
 	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {

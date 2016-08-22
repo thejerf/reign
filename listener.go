@@ -391,7 +391,7 @@ func (ic *incomingConnection) handleIncomingMessages() {
 	ic.resetConnectionDeadline(DeadlineInterval)
 
 	go func() {
-		var err error
+		var pErr error
 
 		// Send PING messages to the remote node at regular intervals.
 		// The pingTimer may never fire if messages come in more frequently
@@ -401,9 +401,9 @@ func (ic *incomingConnection) handleIncomingMessages() {
 		for {
 			select {
 			case <-ic.pingTimer.C:
-				err = ic.output.Encode(&ping)
-				if err != nil {
-					ic.Error("Attempted to ping node %d: %s", ic.client.ID, err)
+				pErr = ic.output.Encode(&ping)
+				if pErr != nil {
+					ic.Error("Attempted to ping node %d: %s", ic.client.ID, pErr)
 				}
 				ic.resetPingTimer(PingInterval)
 			case <-done:
