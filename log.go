@@ -3,6 +3,8 @@ package reign
 import (
 	"fmt"
 	"log"
+
+	m "github.com/thejerf/reign/messages"
 )
 
 // A ClusterLogger is the logging interface used by the Cluster system.
@@ -54,19 +56,19 @@ type wrapLogger struct {
 }
 
 func (sl wrapLogger) Trace(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[TRAC] reign: "+fmt.Sprintf("%v", s), vals...))
+	sl.logger.Output(2, m.Trace(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)).String())
 }
 
 func (sl wrapLogger) Info(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[INFO] reign: "+fmt.Sprintf("%v", s), vals...))
+	sl.logger.Output(2, m.Info(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)).String())
 }
 
 func (sl wrapLogger) Warn(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[WARN] reign: "+fmt.Sprintf("%v", s), vals...))
+	sl.logger.Output(2, m.Warn(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)).String())
 }
 
 func (sl wrapLogger) Error(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[ERR] reign: "+fmt.Sprintf("%v", s), vals...))
+	sl.logger.Output(2, m.Error(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)).String())
 }
 
 // StdLogger is a ClusterLogger that will use the log.Output function
@@ -76,16 +78,16 @@ var StdLogger = stdLogger{}
 type stdLogger struct{}
 
 func (sl stdLogger) Trace(s interface{}, vals ...interface{}) {
-	log.Printf("[TRAC] reign: "+fmt.Sprintf("%v", s), vals...)
+	log.Print(m.Trace(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)))
 }
 func (sl stdLogger) Info(s interface{}, vals ...interface{}) {
-	log.Printf("[INFO] reign: "+fmt.Sprintf("%v", s), vals...)
+	log.Print(m.Info(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)))
 }
 func (sl stdLogger) Warn(s interface{}, vals ...interface{}) {
-	log.Printf("[WARN] reign: "+fmt.Sprintf("%v", s), vals...)
+	log.Print(m.Warn(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)))
 }
 func (sl stdLogger) Error(s interface{}, vals ...interface{}) {
-	log.Printf("[ERR] reign: "+fmt.Sprintf("%v", s), vals...)
+	log.Print(m.Error(fmt.Sprintf(fmt.Sprintf("%v", s), vals...)))
 }
 
 // NullLogger implements ClusterLogger, and throws all logging messages away.

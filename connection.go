@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/thejerf/reign/internal"
+	m "github.com/thejerf/reign/messages"
 	"github.com/thejerf/suture"
 )
 
@@ -171,7 +172,7 @@ func newConnections(cluster *Cluster, myNodeID NodeID) *connectionServer {
 	l := cluster.ClusterLogger
 
 	logFunc := func(msg string) {
-		l.Warn(msg)
+		l.Warn(m.Warn(msg))
 	}
 
 	// This specifies that we try fairly frequently to reconnect from a

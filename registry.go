@@ -68,6 +68,7 @@ import (
 	"sync"
 
 	"github.com/thejerf/reign/internal"
+	m "github.com/thejerf/reign/messages"
 )
 
 // ErrNoAddressRegistered is returned when there are no addresses at
@@ -151,7 +152,7 @@ type Names interface {
 // taking out the lock (registry.m).  Most of the functionality required can
 // be accessed through the publically-exposed (uppercase) methods.
 type registry struct {
-	m sync.Mutex
+	mu sync.Mutex
 
 	// the set of all claims understood by the local node, organized as
 	// name -> set of mailbox IDs.
@@ -214,8 +215,8 @@ func (r *registry) Terminate() {
 // is not added to this map, this node will be unable to send registry-related
 // messages to the remote node (e.g., register name, unregister name, etc.).
 func (r *registry) addNodeRegistry(n NodeID, a Address) {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	r.nodeRegistries[n] = a
 }
@@ -232,16 +233,16 @@ func (r *registry) String() string {
 	// Since the registry's Serve() method acquires a lock receiving messages,
 	// we need to make sure that we also acquire that lock before replying to
 	// Suture's service name inquiry.
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	return fmt.Sprintf("registry on node %d", r.thisNode)
 }
 
 func (r *registry) Serve() {
 	for {
-		m := r.ReceiveNext()
-		switch msg := m.(type) {
+		message := r.ReceiveNext()
+		switch msg := message.(type) {
 		case internal.RegisterName: // Received locally
 			r.register(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
 
@@ -287,7 +288,7 @@ func (r *registry) Serve() {
 			// begin with rather than catching the MailboxTerminated here.
 
 		default:
-			r.connectionServer.ClusterLogger.Error("Unknown registry message of type %T: %#v\n", msg, m)
+			r.connectionServer.ClusterLogger.Error(m.Error(fmt.Sprintf("Unknown registry message of type %T: %#v\n", msg, message)))
 		}
 	}
 }
@@ -301,8 +302,8 @@ func (r *registry) Sync() {
 // generateAllNodeClaims returns a populated AllNodeClaims object suitable
 // for synchronizing mailbox claims with a remote node.
 func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	anc := internal.AllNodeClaims{
 		Node:   internal.IntNodeID(r.connectionServer.nodeID),
@@ -352,9 +353,9 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 		}
 	}
 
-	r.m.Lock()
+	r.mu.Lock()
 	delete(r.nodeRegistries, msg.node)
-	r.m.Unlock()
+	r.mu.Unlock()
 }
 
 func (r *registry) toOtherNodes(msg interface{}) {
@@ -371,8 +372,8 @@ func (r *registry) GetDebugger() NamesDebugger {
 // registered with the given string.
 //
 func (r *registry) Lookup(s string) *Address {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	claims := r.claims[s]
 	claimIDs := make([]MailboxID, 0, len(claims))
@@ -450,8 +451,8 @@ func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 
 // register is the internal registration function.
 func (r *registry) register(node NodeID, name string, mID MailboxID) {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	nameClaimants, haveNameClaimants := r.claims[name]
 	if !haveNameClaimants {
@@ -483,8 +484,8 @@ func (r *registry) register(node NodeID, name string, mID MailboxID) {
 // check for anyone currently waiting for a termination notice on that
 // name and send it.
 func (r *registry) unregister(node NodeID, name string, mID MailboxID) {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	currentRegistrants, ok := r.claims[name]
 	if !ok {
@@ -512,8 +513,8 @@ func (r *registry) unregisterMailbox(node NodeID, mID MailboxID) {
 // RegistryDebugger methods
 
 func (r *registry) DumpClaims() map[string][]MailboxID {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	copy := make(map[string][]MailboxID, len(r.claims))
 	for name := range r.claims {
@@ -534,8 +535,8 @@ func (r *registry) DumpJSON() string {
 }
 
 func (r *registry) AddressCount() uint {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	count := uint(0)
 	for _, addresses := range r.claims {
@@ -545,8 +546,8 @@ func (r *registry) AddressCount() uint {
 }
 
 func (r *registry) AllNames() []string {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	names := make([]string, 0, len(r.claims))
 	for name := range r.claims {
@@ -558,8 +559,8 @@ func (r *registry) AllNames() []string {
 // SeenNames returns an array where each element corresponds to whether the inputted name
 // at that index was found in the registry or not
 func (r *registry) SeenNames(names ...string) []bool {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	seen := make([]bool, 0, len(names))
 	for _, name := range names {

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/thejerf/reign/internal"
+	m "github.com/thejerf/reign/messages"
 )
 
 type messageSender interface {
@@ -120,15 +121,15 @@ func (rm *remoteMailboxes) send(cm internal.ClusterMessage, desc string) error {
 
 	if rm.connection == nil {
 		if rm.ClusterLogger != nil {
-			rm.Error("Could send message \"%s\" because there's no connection", desc)
+			rm.Error(m.Error(fmt.Sprintf("Could send message \"%s\" because there's no connection", desc)))
 		}
 		return errNoConnection
 	}
 
 	err := rm.connection.send(&cm)
 	if err != nil {
-		rm.Error("Error sending msg \"%s\": %s", desc, myString(err))
-		rm.Error("Message payload: %#v", cm)
+		rm.Error(m.Error(fmt.Sprintf("Error sending msg \"%s\": %s", desc, myString(err))))
+		rm.Error(m.Error(fmt.Sprintf("Message payload: %#v", cm)))
 	}
 	return err
 }
@@ -152,7 +153,7 @@ func (rm *remoteMailboxes) Serve() {
 		rm.linksToRemote = make(map[MailboxID]map[MailboxID]voidtype)
 
 		if r := recover(); r != nil {
-			rm.Error("While handling mailbox, got fatal error (this is a serious bug): %s", myString(r))
+			rm.Error(m.Error(fmt.Sprintf("While handling mailbox, got fatal error (this is a serious bug): %s", myString(r))))
 			rm.Lock()
 			if rm.connection != nil {
 				rm.connection.terminate()
@@ -162,23 +163,23 @@ func (rm *remoteMailboxes) Serve() {
 		}
 	}()
 
-	var m interface{}
+	var message interface{}
 	for {
 		if rm.doneProcessing != nil {
-			if !rm.doneProcessing(m) {
+			if !rm.doneProcessing(message) {
 				rm.doneProcessing = nil
 			}
 		}
 
-		m = rm.outgoingMailbox.ReceiveNext()
+		message = rm.outgoingMailbox.ReceiveNext()
 
 		if rm.examineMessages != nil {
-			if !rm.examineMessages(m) {
+			if !rm.examineMessages(message) {
 				rm.examineMessages = nil
 			}
 		}
 
-		switch msg := m.(type) {
+		switch msg := message.(type) {
 		case internal.OutgoingMailboxMessage:
 			rm.send(
 				internal.IncomingMailboxMessage{
@@ -328,7 +329,7 @@ func (rm *remoteMailboxes) Serve() {
 
 		default:
 			fmt.Printf("Unexpected message received: %#v", msg)
-			rm.Error("Unexpected message arrived in our node mailbox: %#v", msg)
+			rm.Error(m.Error(fmt.Sprintf("Unexpected message arrived in our node mailbox: %#v", msg)))
 		}
 	}
 }
