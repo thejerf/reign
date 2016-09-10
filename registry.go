@@ -68,7 +68,6 @@ import (
 	"sync"
 
 	"github.com/thejerf/reign/internal"
-	m "github.com/thejerf/reign/messages"
 )
 
 // ErrNoAddressRegistered is returned when there are no addresses at
@@ -288,7 +287,7 @@ func (r *registry) Serve() {
 			// begin with rather than catching the MailboxTerminated here.
 
 		default:
-			r.connectionServer.ClusterLogger.Error(m.Error(fmt.Sprintf("Unknown registry message of type %T: %#v\n", msg, message)))
+			r.connectionServer.ClusterLogger.Errorf("Unknown registry message of type %T: %#v\n", msg, message)
 		}
 	}
 }

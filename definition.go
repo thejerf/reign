@@ -21,8 +21,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-
-	m "github.com/thejerf/reign/messages"
 )
 
 // The gob unmarshaling interface has no provisions for state in it,
@@ -307,9 +305,9 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 		errs = append(errs, "no nodes specified in cluster definition")
 	}
 
-	log.Info(m.Info("beginning DNS resolution (if you don't see DNS resolution completed, suspect DNS issues)"))
+	log.Info("beginning DNS resolution (if you don't see DNS resolution completed, suspect DNS issues)")
 	for _, nodeDef := range spec.Nodes {
-		log.Info(m.Info(fmt.Sprintf("About to try to resolve: %s", nodeDef.Address)))
+		log.Infof("About to try to resolve: %s", nodeDef.Address)
 		if nodeDef.Address == "" {
 			errs = append(errs, fmt.Sprintf("node %d has empty or missing address", byte(nodeDef.ID)))
 		} else {
@@ -340,7 +338,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 			}
 		}
 	}
-	log.Info(m.Info("DNS resolution completed"))
+	log.Info("DNS resolution completed")
 
 	var permittedProtocols []uint16
 	if spec.PermittedProtocols != nil {
