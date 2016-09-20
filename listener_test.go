@@ -7,11 +7,15 @@ import (
 )
 
 func TestCoverNilListener(t *testing.T) {
+	t.Parallel()
+
 	var nl *nodeListener
 	nl.waitForListen()
 }
 
 func TestCoverIncomingConnection(t *testing.T) {
+	t.Parallel()
+
 	var ic *incomingConnection
 	err := ic.send(nil)
 	if err == nil {
@@ -26,6 +30,8 @@ func (s S) String() string {
 }
 
 func TestMyStringCover(t *testing.T) {
+	t.Parallel()
+
 	myString(S{})
 }
 
@@ -78,6 +84,7 @@ func TestNodeListenerErrors(t *testing.T) {
 		terminated <- struct{}{}
 	}()
 	nl.waitForListen()
+	_ = nl.String() // should not block
 	nl.listener.Close()
 	<-terminated
 }
@@ -142,6 +149,8 @@ func thingsTerminateOnFailure(t *testing.T, ntb *NetworkTestBed) {
 }
 
 func TestCoverStopNodeListener(t *testing.T) {
+	t.Parallel()
+
 	nl := new(nodeListener)
 	nl.Stop()
 	if !nl.stopped {

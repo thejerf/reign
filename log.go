@@ -35,12 +35,14 @@ import (
 //
 // You can wrap a standard *log.Logger with the provided WrapLogger.
 type ClusterLogger interface {
-	// Used in debugging, should ship commented out.
-	Trace(interface{}, ...interface{})
-
-	Info(interface{}, ...interface{})
-	Warn(interface{}, ...interface{})
-	Error(interface{}, ...interface{})
+	Error(...interface{})
+	Errorf(format string, args ...interface{})
+	Warn(...interface{})
+	Warnf(format string, args ...interface{})
+	Info(...interface{})
+	Infof(format string, args ...interface{})
+	Trace(...interface{})
+	Tracef(format string, args ...interface{})
 }
 
 // WrapLogger takes as standard *log.Logger and returns a ClusterLogger
@@ -53,20 +55,36 @@ type wrapLogger struct {
 	logger *log.Logger
 }
 
-func (sl wrapLogger) Trace(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[TRAC] reign: "+fmt.Sprintf("%v", s), vals...))
+func (sl wrapLogger) Error(args ...interface{}) {
+	sl.logger.Output(2, "[ERROR] reign: "+fmt.Sprint(args...)+"\n")
 }
 
-func (sl wrapLogger) Info(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[INFO] reign: "+fmt.Sprintf("%v", s), vals...))
+func (sl wrapLogger) Errorf(format string, args ...interface{}) {
+	sl.logger.Output(2, fmt.Sprintf("[ERROR] reign: "+format+"\n", args...))
 }
 
-func (sl wrapLogger) Warn(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[WARN] reign: "+fmt.Sprintf("%v", s), vals...))
+func (sl wrapLogger) Warn(args ...interface{}) {
+	sl.logger.Output(2, "[WARN] reign: "+fmt.Sprint(args...)+"\n")
 }
 
-func (sl wrapLogger) Error(s interface{}, vals ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[ERR] reign: "+fmt.Sprintf("%v", s), vals...))
+func (sl wrapLogger) Warnf(format string, args ...interface{}) {
+	sl.logger.Output(2, fmt.Sprintf("[WARN] reign: "+format+"\n", args...))
+}
+
+func (sl wrapLogger) Info(args ...interface{}) {
+	sl.logger.Output(2, "[INFO] reign: "+fmt.Sprint(args...)+"\n")
+}
+
+func (sl wrapLogger) Infof(format string, args ...interface{}) {
+	sl.logger.Output(2, fmt.Sprintf("[INFO] reign: "+format+"\n", args...))
+}
+
+func (sl wrapLogger) Trace(args ...interface{}) {
+	sl.logger.Output(2, "[TRACE] reign: "+fmt.Sprint(args...)+"\n")
+}
+
+func (sl wrapLogger) Tracef(format string, args ...interface{}) {
+	sl.logger.Output(2, fmt.Sprintf("[TRACE] reign: "+format+"\n", args...))
 }
 
 // StdLogger is a ClusterLogger that will use the log.Output function
@@ -75,17 +93,36 @@ var StdLogger = stdLogger{}
 
 type stdLogger struct{}
 
-func (sl stdLogger) Trace(s interface{}, vals ...interface{}) {
-	log.Printf("[TRAC] reign: "+fmt.Sprintf("%v", s), vals...)
+func (sl stdLogger) Error(args ...interface{}) {
+	fmt.Println("[ERROR] reign: " + fmt.Sprint(args...))
 }
-func (sl stdLogger) Info(s interface{}, vals ...interface{}) {
-	log.Printf("[INFO] reign: "+fmt.Sprintf("%v", s), vals...)
+
+func (sl stdLogger) Errorf(format string, args ...interface{}) {
+	fmt.Printf("[ERROR] reign: "+format+"\n", args...)
 }
-func (sl stdLogger) Warn(s interface{}, vals ...interface{}) {
-	log.Printf("[WARN] reign: "+fmt.Sprintf("%v", s), vals...)
+
+func (sl stdLogger) Warn(args ...interface{}) {
+	fmt.Println("[WARN] reign: " + fmt.Sprint(args...))
 }
-func (sl stdLogger) Error(s interface{}, vals ...interface{}) {
-	log.Printf("[ERR] reign: "+fmt.Sprintf("%v", s), vals...)
+
+func (sl stdLogger) Warnf(format string, args ...interface{}) {
+	fmt.Printf("[WARN] reign: "+format+"\n", args...)
+}
+
+func (sl stdLogger) Info(args ...interface{}) {
+	fmt.Println("[INFO] reign: " + fmt.Sprint(args...))
+}
+
+func (sl stdLogger) Infof(format string, args ...interface{}) {
+	fmt.Printf("[INFO] reign: "+format+"\n", args...)
+}
+
+func (sl stdLogger) Trace(args ...interface{}) {
+	fmt.Println("[TRACE] reign: " + fmt.Sprint(args...))
+}
+
+func (sl stdLogger) Tracef(format string, args ...interface{}) {
+	fmt.Printf("[TRACE] reign: "+format+"\n", args...)
 }
 
 // NullLogger implements ClusterLogger, and throws all logging messages away.
@@ -93,7 +130,17 @@ var NullLogger = nullLogger{}
 
 type nullLogger struct{}
 
-func (nl nullLogger) Trace(s interface{}, vals ...interface{}) {}
-func (nl nullLogger) Info(s interface{}, vals ...interface{})  {}
-func (nl nullLogger) Warn(s interface{}, vals ...interface{})  {}
-func (nl nullLogger) Error(s interface{}, vals ...interface{}) {}
+func (nl nullLogger) Error(args ...interface{})                 {}
+func (nl nullLogger) Errorf(format string, args ...interface{}) {}
+func (nl nullLogger) Warn(args ...interface{})                  {}
+func (nl nullLogger) Warnf(format string, args ...interface{})  {}
+func (nl nullLogger) Info(args ...interface{})                  {}
+func (nl nullLogger) Infof(format string, args ...interface{})  {}
+func (nl nullLogger) Trace(args ...interface{})                 {}
+func (nl nullLogger) Tracef(format string, args ...interface{}) {}
+
+var (
+	_ ClusterLogger = (*wrapLogger)(nil)
+	_ ClusterLogger = (*stdLogger)(nil)
+	_ ClusterLogger = (*nullLogger)(nil)
+)

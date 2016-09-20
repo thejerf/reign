@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 KEYLENGTH=$1
 
@@ -11,8 +11,8 @@ fi
 
 unalias rm 2>/dev/null
 
-openssl req -newkey rsa:$KEYLENGTH -keyout signing.key.enc -out signing.req -subj "/C=GO/ST=reign/CN=Reign Signing Certificate/" -passout pass:abcd &&\
-    openssl rsa -in signing.key.enc -out signing.key -passin pass:abcd && \
-    rm -f signing.key.enc && \
-    openssl x509 -req -days 3650 -in signing.req -signkey signing.key -out signing.crt && \
-    rm -f signing.req
+openssl req -newkey ec:<(openssl ecparam -name secp521r1) -keyout signing.key.enc -out signing.req -subj "/C=GO/ST=reign/CN=Reign Signing Certificate/" -passout pass:abcd &&\
+openssl ec -in signing.key.enc -out signing.key -passin pass:abcd && \
+rm -f signing.key.enc && \
+openssl x509 -req -days 3650 -in signing.req -signkey signing.key -out signing.crt && \
+rm -f signing.req

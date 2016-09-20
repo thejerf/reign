@@ -13,18 +13,14 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"flag"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"io/ioutil"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/thejerf/suture"
 )
 
 // The gob unmarshaling interface has no provisions for state in it,
@@ -42,7 +38,7 @@ import (
 var connections *connectionServer
 var connectionsL sync.Mutex
 
-// This lets people specify the permitted ciphers with the usual TLS
+// cipherToID lets people specify the permitted ciphers with the usual TLS
 // strings in their JSON. Copied from the definition in the crypto/tls
 // module; should more protocols be added, this table should be extended.
 var cipherToID = map[string]uint16{
@@ -50,6 +46,8 @@ var cipherToID = map[string]uint16{
 	"TLS_RSA_WITH_3DES_EDE_CBC_SHA":           0x000a,
 	"TLS_RSA_WITH_AES_128_CBC_SHA":            0x002f,
 	"TLS_RSA_WITH_AES_256_CBC_SHA":            0x0035,
+	"TLS_RSA_WITH_AES_128_GCM_SHA256":         0x009c,
+	"TLS_RSA_WITH_AES_256_GCM_SHA384":         0x009d,
 	"TLS_ECDHE_ECDSA_WITH_RC4_128_SHA":        0xc007,
 	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":    0xc009,
 	"TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":    0xc00a,
@@ -59,6 +57,15 @@ var cipherToID = map[string]uint16{
 	"TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":      0xc014,
 	"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":   0xc02f,
 	"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": 0xc02b,
+	"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":   0xc030,
+	"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384": 0xc02c,
+}
+
+// defaultPermittedProtocols are the default TLS configuration cipher suites.
+// This value may be overridden in the cluster spec.  By default, we're as
+// restrictive and secure as possible.
+var defaultPermittedProtocols = []uint16{
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 }
 
 // NodeID is used to identify the current node's ID.
@@ -80,7 +87,7 @@ type NodeID byte
 // The LocalAddress is the address to use for the outgoing connections to
 // the cluster. If blank, net.DialTCP will be passed nil for the laddr.
 type NodeDefinition struct {
-	ID            NodeID `json:"-"`
+	ID            NodeID `json:"id"`
 	Address       string `json:"address"`
 	ListenAddress string `json:"listen_address,omit_empty"`
 	LocalAddress  string `json:"local_address,omit_empty"`
@@ -98,7 +105,7 @@ type NodeDefinition struct {
 // to specify the NodeID as the key to "nodes". (encoding/json does not
 // permit anything except strings as keys for the map.)
 type ClusterSpec struct {
-	Nodes map[string]*NodeDefinition `json:"nodes"`
+	Nodes []*NodeDefinition `json:"nodes"`
 
 	PermittedProtocols []string `json:"permitted_protocols,omit_empty"`
 
@@ -162,45 +169,45 @@ type Cluster struct {
 	ClusterLogger
 }
 
-var clusterSpecLocation = flag.String("clusterspec", "", "The location of the cluster file. (No specification starts a local-only cluster.)")
+var errNodeNotDefined = errors.New("the node claimed to be the local node is not defined")
+
+// RegisterType registers a type to be sent across the cluster.
+//
+// This wraps gob.Register, in case we ever change the encoding method.
+func RegisterType(value interface{}) {
+	gob.Register(value)
+}
 
 // NoClustering is called to say you have no interest in clustering.
 //
 // This configures reign to work in a no-clustering state. You can use
 // all mailbox functionality, and there will be no network activity or
 // configuration required.
-func NoClustering() {
-	setConnections(noClustering(NullLogger))
+func NoClustering() (ConnectionService, Names) {
+	return noClustering(NullLogger)
+}
+
+func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
+	nodeID := NodeID(0)
+	clusterSpec := &ClusterSpec{
+		Nodes: []*NodeDefinition{
+			&NodeDefinition{
+				ID:      nodeID,
+				Address: "127.0.0.1:65530",
+			},
+		},
+	}
+
+	cs, r, _ = createFromSpec(clusterSpec, nodeID, log)
+
+	return
 }
 
 func setConnections(c *connectionServer) {
 	connectionsL.Lock()
+	defer connectionsL.Unlock()
+
 	connections = c
-	connectionsL.Unlock()
-}
-
-func noClustering(log ClusterLogger) *connectionServer {
-	nodeID := NodeID(0)
-	localNode := &NodeDefinition{
-		ID:            nodeID,
-		Address:       "127.0.0.1:65530",
-		ListenAddress: "",
-	}
-
-	clusterSpec := &ClusterSpec{
-		Nodes: map[string]*NodeDefinition{
-			fmt.Sprintf("%d", nodeID): localNode,
-		},
-	}
-
-	connectionServer, _ := createFromSpec(clusterSpec, nodeID, log)
-
-	// .source is currently unused.
-	// connectionServer.source = func() (*ClusterSpec, error) {
-	// 	return nil, errors.New("cluster spec was hard coded, no update possible")
-	// }
-
-	return connectionServer
 }
 
 // CreateFromSpecFile is the most automated way of creating a cluster, using the
@@ -213,38 +220,41 @@ func noClustering(log ClusterLogger) *connectionServer {
 //
 // nil may be passed as the ClusterLogger, in which case the standard log.Printf
 // will be used.
-func CreateFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
+func CreateFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
 	return createFromSpecFile(clusterSpecLocation, thisNode, log)
 }
 
-func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
-	f, err := os.Open(clusterSpecLocation)
+func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (s ConnectionService, n Names, err error) {
+	var f *os.File
+	f, err = os.Open(clusterSpecLocation)
 	if err != nil {
-		return nil, err
+		return
 	}
+	defer f.Close()
 
 	return createFromReader(f, thisNode, log)
 }
 
 // CreateFromReader creates a cluster based on the io.Reader of your choice.
-func CreateFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
+func CreateFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
 	return createFromReader(r, thisNode, log)
 }
 
-func createFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (*connectionServer, error) {
-	contents, err := ioutil.ReadAll(r)
+func createFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (cs *connectionServer, n Names, err error) {
+	var contents []byte
+	contents, err = ioutil.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	return createFromJSON(contents, thisNode, log)
 }
 
-func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (*connectionServer, error) {
+func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (cs *connectionServer, r *registry, err error) {
 	clusterSpec := ClusterSpec{}
-	err := json.Unmarshal(contents, &clusterSpec)
+	err = json.Unmarshal(contents, &clusterSpec)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	// since we can't trust the json decoding to produce legal values,
@@ -254,13 +264,9 @@ func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (*conne
 
 // CreateFromSpec creates a cluster directly from a *ClusterSpec, the
 // ultimate in control.
-func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (suture.Service, error) {
-	connectionServer, err := createFromSpec(spec, thisNode, log)
-	if err != nil {
-		// Set the global value
-		setConnections(connectionServer)
-	}
-	return connectionServer, err
+func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (cs ConnectionService, n Names, err error) {
+	cs, n, err = createFromSpec(spec, thisNode, log)
+	return
 }
 
 func (c *Cluster) tlsConfig(serverNode NodeID) *tls.Config {
@@ -276,19 +282,19 @@ func (c *Cluster) tlsConfig(serverNode NodeID) *tls.Config {
 	return tlsConfig
 }
 
-func resolveLog(l ClusterLogger) ClusterLogger {
-	if l == nil {
+func resolveLog(cl ClusterLogger) ClusterLogger {
+	if cl == nil {
 		return StdLogger
 	}
-	return l
+	return cl
 }
 
 // This ugly lil' wad of code takes in the cluster specification and returns
 // the actual cluster, as embedded in a connectionServer. Error handling
 // code is so droll, isn't it?
-func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*connectionServer, error) {
+func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*connectionServer, *registry, error) {
 	if connections != nil {
-		panic("Declaring cluster when cluster has already been declared.")
+		panic("redefining the cluster is not permitted")
 	}
 
 	log = resolveLog(log)
@@ -300,16 +306,8 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	}
 
 	log.Info("beginning DNS resolution (if you don't see DNS resolution completed, suspect DNS issues)")
-	for nodeID, nodeDef := range spec.Nodes {
-		// we leave this out of the JSON so there can't be a mismatch
-		idNum, err := strconv.ParseUint(nodeID, 10, 8)
-		if err != nil {
-			errs = append(errs, "while parsing node ID: "+err.Error())
-			continue
-		}
-		nodeDef.ID = NodeID(idNum)
-
-		log.Info("About to try to resolve: %s", nodeDef.Address)
+	for _, nodeDef := range spec.Nodes {
+		log.Infof("About to try to resolve: %s", nodeDef.Address)
 		if nodeDef.Address == "" {
 			errs = append(errs, fmt.Sprintf("node %d has empty or missing address", byte(nodeDef.ID)))
 		} else {
@@ -353,19 +351,23 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 			}
 		}
 	} else {
-		permittedProtocols = []uint16{tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256}
+		permittedProtocols = defaultPermittedProtocols
 	}
 
-	cluster := &Cluster{}
+	cluster := &Cluster{
+		PermittedProtocols: permittedProtocols,
+	}
+	var cert tls.Certificate
+	var err error
 
 	if spec.NodeKeyPath != "" && spec.NodeCertPath != "" {
-		cert, err := tls.LoadX509KeyPair(spec.NodeCertPath, spec.NodeKeyPath)
+		cert, err = tls.LoadX509KeyPair(spec.NodeCertPath, spec.NodeKeyPath)
 		if err != nil {
 			errs = append(errs, "Error from loading the node cert from the disk: "+err.Error())
 		}
 		cluster.Certificate = cert
 	} else if spec.NodeKeyPEM != "" && spec.NodeCertPEM != "" {
-		cert, err := tls.X509KeyPair([]byte(spec.NodeCertPEM), []byte(spec.NodeKeyPEM))
+		cert, err = tls.X509KeyPair([]byte(spec.NodeCertPEM), []byte(spec.NodeKeyPEM))
 		if err != nil {
 			errs = append(errs, "Error loading the node cert from PEMs: "+err.Error())
 		}
@@ -376,7 +378,16 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 			errs = append(errs, "No valid certificate for this node found.")
 		}
 	}
-	// FIXME: Validate the cert's node is the common name for the cert
+
+	// Validate the cert's node is the common name for the cert
+	if len(cert.Certificate) > 0 {
+		x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			errs = append(errs, err.Error())
+		} else if nodeID := fmt.Sprintf("%d", thisNode); x509Cert.Subject.CommonName != nodeID {
+			errs = append(errs, fmt.Sprintf("The current node ID (%s) does not match the certificate's common name (%s)", nodeID, x509Cert.Subject.CommonName))
+		}
+	}
 
 	var clusterCertPEM []byte
 	if spec.ClusterCertPath != "" {
@@ -389,7 +400,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 		clusterCertPEM = []byte(spec.ClusterCertPEM)
 	}
 	if clusterCertPEM != nil {
-		// assume the CERT is the first black
+		// assume the CERT is the first block
 		certDERBlock, _ := pem.Decode(clusterCertPEM)
 		if certDERBlock == nil {
 			errs = append(errs, "Cluster cert had an error not located in the cert definition")
@@ -416,15 +427,14 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	// Having passed all our checks, let's actually create the cluster
 	cluster.Nodes = make(map[NodeID]*NodeDefinition, len(spec.Nodes))
 
-	for nodeID, nodeDef := range spec.Nodes {
-		nodeIDNum, _ := strconv.ParseUint(nodeID, 10, 8)
-		id := NodeID(nodeIDNum)
-		cluster.Nodes[id] = nodeDef
+	// Make a map from the list, keying by node ID
+	for _, nodeDef := range spec.Nodes {
+		cluster.Nodes[nodeDef.ID] = nodeDef
 	}
 
 	thisNodeDef, exists := cluster.Nodes[thisNode]
 	if !exists {
-		return nil, errors.New("the node claimed to be the local node is not defined")
+		return nil, nil, errNodeNotDefined
 	}
 
 	// now we create the hash. This is used to verify that all cluster elements
@@ -437,7 +447,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	cluster.hash = hash.Sum64()
 
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s\n",
+		return nil, nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s\n",
 			strings.Join(errs, "\n * "),
 		)
 	}
@@ -448,7 +458,11 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 
 	connectionServer.Cluster = cluster
 	cluster.ThisNode = thisNodeDef
-	return connectionServer, nil
+
+	// Set the global connection server.
+	setConnections(connectionServer)
+
+	return connectionServer, connectionServer.registry, nil
 }
 
 // AddConnectionStatusCallback allows you to register a callback to be

@@ -39,6 +39,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/thejerf/reign/internal"
 )
@@ -49,12 +50,11 @@ const (
 
 // nodeConnector bundles together all of the information about how to connect
 // to a node. The actual connection is a nodeConnection. This runs as a
-// supervised servec.
+// supervised service.
 type nodeConnector struct {
 	source  *NodeDefinition
 	dest    *NodeDefinition
 	cluster *Cluster
-	cancel  bool
 	ClusterLogger
 
 	// this mailbox should never get out to the "rest" of the system.
@@ -67,107 +67,10 @@ type nodeConnector struct {
 	connectionServer *connectionServer
 	connection       *nodeConnection
 
-	failOnSSLHandshake     bool
-	failOnClusterHandshake bool
-}
-
-// this is the literal connection to the node.
-type nodeConnection struct {
-	conn      net.Conn
-	tls       *tls.Conn
-	rawOutput io.WriteCloser
-	rawInput  io.ReadCloser
-	output    *gob.Encoder
-	input     *gob.Decoder
-
-	connectionServer *connectionServer
-	source           *NodeDefinition
-	dest             *NodeDefinition
-	ClusterLogger
-	*nodeConnector
+	cancel bool
 
 	failOnSSLHandshake     bool
 	failOnClusterHandshake bool
-}
-
-func (nc *nodeConnector) String() string {
-	return fmt.Sprintf("nodeConnector %d -> %d", nc.source.ID, nc.dest.ID)
-}
-
-func (nc *nodeConnector) Serve() {
-	nc.Trace("node connection from %d to %d starting serve", nc.source.ID, nc.dest.ID)
-
-	connection, err := nc.connect()
-	nc.connection = connection
-	if err != nil {
-		nc.Error("Could not connect to node %v: %s", nc.dest.ID, err.Error())
-		return
-	}
-	nc.Trace("%d -> %d connected", nc.source.ID, nc.dest.ID)
-
-	// sync with the Stop method, which could conceivably be triggered
-	// before we even get here
-	nc.Lock()
-	if nc.cancel {
-		connection.terminate()
-	}
-	defer connection.terminate()
-	nc.Unlock()
-
-	err = connection.sslHandshake()
-	if err != nil {
-		nc.Error("Could not SSL handshake to node %v: %s", nc.dest.ID, err.Error())
-		return
-	}
-	nc.Trace("%d -> %d ssl handshake successful", nc.source.ID, nc.dest.ID)
-
-	err = connection.clusterHandshake()
-	if err != nil {
-		nc.Error("Could not perform cluster handshake with node %v: %s", nc.dest.ID, err.Error())
-		return
-	}
-	nc.Trace("%d -> %d cluster handshake successful", nc.source.ID, nc.dest.ID)
-
-	// hook up the connection to the permanent message manager
-	nc.remoteMailboxes.setConnection(connection)
-	defer nc.remoteMailboxes.unsetConnection(connection)
-	// and handle all incoming messages
-	connection.handleIncomingMessages()
-}
-
-func (nc *nodeConnector) Stop() {
-	nc.Lock()
-	defer nc.Unlock()
-
-	if nc.connection != nil {
-		nc.connection.terminate()
-		nc.connection = nil
-	} else {
-		nc.cancel = true
-	}
-}
-
-func (nc *nodeConnection) terminate() {
-	if nc == nil {
-		return
-	}
-
-	tls := nc.tls
-	if tls != nil {
-		tls.Close()
-	}
-	conn := nc.conn
-	if conn != nil {
-		conn.Close()
-	}
-	rawOutput := nc.rawOutput
-	if rawOutput != nil {
-		rawOutput.Close()
-	}
-	rawInput := nc.rawInput
-	if rawInput != nil {
-		rawInput.Close()
-	}
 }
 
 // This establishes a connection to the target node. It does NOTHING ELSE,
@@ -195,12 +98,176 @@ func (nc *nodeConnector) connect() (*nodeConnection, error) {
 	}, nil
 }
 
-func (nc *nodeConnection) sslHandshake() error {
-	nc.Trace("Conn to %d in sslHandshake", nc.dest.ID)
+func (nc *nodeConnector) String() string {
+	// Since the node connector's Serve() method acquires a lock while determining
+	// if it should cancel, we need to make sure that we also acquire that lock before
+	// replying to Suture's service name inquiry.
+	nc.Lock()
+	defer nc.Unlock()
+
+	return fmt.Sprintf("nodeConnector %d -> %d", nc.source.ID, nc.dest.ID)
+}
+
+func (nc *nodeConnector) Serve() {
+	nc.Tracef("node connection from %d to %d, starting serve", nc.source.ID, nc.dest.ID)
+
+	connection, err := nc.connect()
+	nc.connection = connection
+	if err != nil {
+		nc.Errorf("Could not connect to node %v: %s", nc.dest.ID, err.Error())
+		return
+	}
+	nc.Tracef("%d -> %d connected", nc.source.ID, nc.dest.ID)
+
+	// sync with the Stop method, which could conceivably be triggered
+	// before we even get here
+	nc.Lock()
+	if nc.cancel {
+		connection.terminate()
+	}
+	defer connection.terminate()
+	nc.Unlock()
+
+	err = connection.sslHandshake()
+	if err != nil {
+		nc.Errorf("Could not SSL handshake to node %v: %s", nc.dest.ID, err.Error())
+		return
+	}
+	nc.Tracef("%d -> %d ssl handshake successful", nc.source.ID, nc.dest.ID)
+
+	err = connection.clusterHandshake()
+	if err != nil {
+		nc.Errorf("Could not perform cluster handshake with node %v: %s", nc.dest.ID, err.Error())
+		return
+	}
+	nc.Tracef("%d -> %d cluster handshake successful", nc.source.ID, nc.dest.ID)
+
+	// hook up the connection to the permanent message manager
+	nc.remoteMailboxes.setConnection(connection)
+	defer nc.remoteMailboxes.unsetConnection(connection)
+
+	// Synchronize registry with the remote node.
+	err = connection.registrySync()
+	if err != nil {
+		nc.Errorf("Could not sync registry with node %v: %s", nc.dest.ID, err.Error())
+		return
+	}
+	nc.Tracef("%d -> %d registry sync successful", nc.source.ID, nc.dest.ID)
+
+	// and handle all incoming messages
+	connection.handleIncomingMessages()
+}
+
+func (nc *nodeConnector) Stop() {
+	nc.Lock()
+	defer nc.Unlock()
+
+	if nc.connection != nil {
+		nc.connection.terminate()
+		nc.connection = nil
+	} else {
+		nc.cancel = true
+	}
+}
+
+// this is the literal connection to the node.
+type nodeConnection struct {
+	conn      net.Conn
+	tls       *tls.Conn
+	rawOutput io.WriteCloser
+	rawInput  io.ReadCloser
+	output    *gob.Encoder
+	input     *gob.Decoder
+	pingTimer *time.Timer
+
+	connectionServer *connectionServer
+	source           *NodeDefinition
+	dest             *NodeDefinition
+	ClusterLogger
+	*nodeConnector
+
+	failOnSSLHandshake     bool
+	failOnClusterHandshake bool
+
+	// Used for testing purposes to peek in on incoming messages.
+	peekFunc func(internal.ClusterMessage)
+}
+
+// peekIncomingMessage accepts a cluster message and sends it to the
+// peekFunc(), if set.
+func (nc *nodeConnection) peekIncomingMessage(cm internal.ClusterMessage) {
+	nc.Lock()
+	defer nc.Unlock()
+
+	if nc.peekFunc == nil {
+		return
+	}
+
+	nc.peekFunc(cm)
+}
+
+// setPeekFunc accepts a function and assigns it to the node connection's
+// peekFunc field.
+func (nc *nodeConnection) setPeekFunc(pf func(internal.ClusterMessage)) {
+	nc.Lock()
+	defer nc.Unlock()
+
+	nc.peekFunc = pf
+}
+
+// resetConnectionDeadline resets the network connection's deadline to
+// the specified duration from time.Now().
+func (nc *nodeConnection) resetConnectionDeadline(d time.Duration) {
+	err := nc.conn.SetDeadline(time.Now().Add(d))
+	if err != nil {
+		nc.Errorf("Unable to set network connection deadline: %s", err)
+	}
+}
+
+// resetPingTimer accepts a duration and resets the node connection's
+// ping timer.  The timer is initialized if it wasn't previously set.
+func (nc *nodeConnection) resetPingTimer(d time.Duration) {
+	nc.Lock()
+	defer nc.Unlock()
+
+	if nc.pingTimer == nil {
+		nc.pingTimer = time.NewTimer(d)
+
+		return
+	}
+
+	nc.pingTimer.Reset(d)
+}
+
+func (nc *nodeConnection) terminate() {
+	if nc == nil {
+		return
+	}
+
+	tls := nc.tls
+	if tls != nil {
+		tls.Close()
+	}
+	conn := nc.conn
+	if conn != nil {
+		conn.Close()
+	}
+	rawOutput := nc.rawOutput
+	if rawOutput != nil {
+		rawOutput.Close()
+	}
+	rawInput := nc.rawInput
+	if rawInput != nil {
+		rawInput.Close()
+	}
+}
+
+func (nc *nodeConnection) sslHandshake() (err error) {
+	nc.Tracef("Conn to %d in sslHandshake", nc.dest.ID)
 	if nc.failOnSSLHandshake {
 		nc.conn.Close()
-		nc.Trace("Failing on ssl handshake, as instructed")
-		return errors.New("failing on ssl handshake, as instructed")
+		err = errors.New("Failing on ssl handshake, as instructed")
+		return
 	}
 	tlsConfig := nc.connectionServer.Cluster.tlsConfig(nc.dest.ID)
 	tlsConn := tls.Client(nc.conn, tlsConfig)
@@ -208,11 +275,10 @@ func (nc *nodeConnection) sslHandshake() error {
 	// I like to run this manually, despite the fact this is run
 	// automatically at first communication,, so I get any errors it may
 	// produce at a controlled time.
-	nc.Trace("Conn to %d handshaking", nc.dest.ID)
-	err := tlsConn.Handshake()
-	nc.Trace("Conn to %d handshook, err: %#v", nc.dest.ID, err)
+	nc.Tracef("Conn to %d handshaking", nc.dest.ID)
+	err = tlsConn.Handshake()
 	if err != nil {
-		return err
+		return
 	}
 
 	nc.tls = tlsConn
@@ -220,64 +286,151 @@ func (nc *nodeConnection) sslHandshake() error {
 	// Initially, we unconditionally use the TLS connection
 	nc.output = gob.NewEncoder(nc.tls)
 	nc.input = gob.NewDecoder(nc.tls)
-	return nil
+	return
 }
 
-func (nc *nodeConnection) clusterHandshake() error {
+func (nc *nodeConnection) clusterHandshake() (err error) {
 	if nc.failOnClusterHandshake {
 		nc.tls.Close()
-		nc.Trace("Failing on cluster handshake, as instructed")
-		return errors.New("failing on cluster handshake, as instructed")
+		err = errors.New("Failing on cluster handshake, as instructed")
+		return
 	}
 	handshake := internal.ClusterHandshake{
 		ClusterVersion: clusterVersion,
 		MyNodeID:       internal.IntNodeID(nc.source.ID),
 		YourNodeID:     internal.IntNodeID(nc.dest.ID),
 	}
-
 	nc.output.Encode(handshake)
 
 	var serverHandshake internal.ClusterHandshake
-	err := nc.input.Decode(&serverHandshake)
+	err = nc.input.Decode(&serverHandshake)
 	if err != nil {
-		return err
+		return
 	}
 
 	myNodeID := NodeID(serverHandshake.MyNodeID)
 	yourNodeID := NodeID(serverHandshake.YourNodeID)
 
 	if serverHandshake.ClusterVersion != clusterVersion {
-		connections.Warn("Remote node id %v claimed unknown cluster version %v, proceeding in the hope that this will all just work out somehow...", nc.dest.ID, serverHandshake.ClusterVersion)
+		connections.Warnf("Remote node id %v claimed unknown cluster version %v, proceeding in the hope that this will all just work out somehow...",
+			nc.dest.ID, serverHandshake.ClusterVersion)
 	}
 	if myNodeID != nc.dest.ID {
-		connections.Warn("The node I thought was #%v is claiming to be #%v instead. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly....", nc.dest.ID, serverHandshake.MyNodeID)
+		connections.Warnf("The node I thought was #%v is claiming to be #%v instead. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly....",
+			nc.dest.ID, serverHandshake.MyNodeID)
 	}
 	if yourNodeID != nc.source.ID {
-		connections.Warn("The node #%v thinks I'm node #%v, but I think I'm node #%v. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly...", nc.dest.ID, serverHandshake.YourNodeID, nc.source.ID)
+		connections.Warnf("The node #%v thinks I'm node #%v, but I think I'm node #%v. These two nodes can not communicate properly. Standing by, hoping a new node definition will resolve this shortly...",
+			nc.dest.ID, serverHandshake.YourNodeID, nc.source.ID)
 	}
 
 	nc.input = gob.NewDecoder(nc.tls)
 
-	return nil
+	return
 }
 
-func (nc *nodeConnection) handleIncomingMessages() {
-	var cm internal.ClusterMessage
-	var err error
+// registrySync sends this node's registry MailboxID and claims to the remote node.
+func (nc *nodeConnection) registrySync() (err error) {
+	// Send our registry synchronization data to the remote node.
+	rs := internal.RegistrySync{
+		Node:      internal.IntNodeID(nc.source.ID),
+		MailboxID: internal.IntMailboxID(nc.connectionServer.registry.Address.GetID()),
+		Claims:    nc.connectionServer.registry.generateAllNodeClaims(),
+	}
+	err = nc.output.Encode(rs)
+	if err != nil {
+		return
+	}
 
-	nc.Trace("Connection %d -> %d in handleIncomingMessages", nc.source.ID, nc.dest.ID)
+	// Receive the remote node's registry synchronization data.
+	var irs internal.RegistrySync
+	err = nc.input.Decode(&irs)
+	if err != nil {
+		return
+	}
+
+	nc.Tracef("Received mailbox ID %x from node %d", irs.MailboxID, irs.Node)
+
+	// Add remote node's registry mailbox ID to the nodeRegistries map.
+	nc.connectionServer.registry.mu.Lock()
+	if nc.connectionServer.registry.nodeRegistries == nil {
+		nc.connectionServer.registry.nodeRegistries = make(map[NodeID]Address)
+	}
+
+	nc.connectionServer.registry.nodeRegistries[NodeID(irs.Node)] = Address{
+		mailboxID:        MailboxID(irs.MailboxID),
+		connectionServer: nc.connectionServer,
+	}
+	nc.connectionServer.registry.mu.Unlock()
+
+	// Process the remote node's registry claims.
+	nc.connectionServer.registry.handleAllNodeClaims(irs.Claims)
+
+	return
+}
+
+// handleIncomingMessages handle replies from the remote node after this
+// node makes a successful connection.
+func (nc *nodeConnection) handleIncomingMessages() {
+	var (
+		cm   internal.ClusterMessage
+		err  error
+		ping internal.ClusterMessage = internal.Ping{}
+		pong internal.ClusterMessage = internal.Pong{}
+		done                         = make(chan struct{})
+	)
+	defer close(done)
+
+	nc.Tracef("Connection %d -> %d in handleIncomingMessages", nc.source.ID, nc.dest.ID)
+	nc.resetConnectionDeadline(DeadlineInterval)
+
+	go func() {
+		var pErr error
+
+		// Send PING messages to the remote node at regular intervals.
+		// The pingTimer may never fire if messages come in more frequently
+		// than the PingInterval.
+		nc.resetPingTimer(PingInterval)
+		for {
+			select {
+			case <-nc.pingTimer.C:
+				pErr = nc.output.Encode(&ping)
+				if pErr != nil {
+					nc.Errorf("Attempted to ping node %d: %s", nc.dest.ID, pErr)
+				}
+				nc.resetPingTimer(PingInterval)
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	for err == nil {
-		// FIXME: Set read timeouts, to handle network errors
-		// FIXME: Send pings, to avoid triggering read timeouts under normal
-		// circumstances
 		err = nc.input.Decode(&cm)
-		if err == nil {
-			err = nc.nodeConnector.remoteMailboxes.Send(cm)
-			if err != nil {
-				nc.Error("Error handling message %#v:\n%#v", cm, err)
+		switch err {
+		case nil:
+			nc.peekIncomingMessage(cm)
+
+			// We received a message.  No need to PING the remote node.
+			nc.resetPingTimer(PingInterval)
+
+			switch cm.(type) {
+			case *internal.Ping:
+				err = nc.output.Encode(&pong)
+				if err != nil {
+					nc.Errorf("Attempted to pong remote node: %s", err)
+				}
+			case *internal.Pong:
+			default:
+				err = nc.nodeConnector.remoteMailboxes.Send(cm)
+				if err != nil {
+					nc.Errorf("Error handling message %#v:\n%#v", cm, err)
+				}
 			}
-		} else {
+			nc.resetConnectionDeadline(DeadlineInterval)
+		case io.EOF:
+			nc.Errorf("Connection to node ID %v has gone down", nc.dest.ID)
+		default:
 			panic(fmt.Sprintf("Error decoding message: %s", err.Error()))
 		}
 	}

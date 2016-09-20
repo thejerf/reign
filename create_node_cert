@@ -1,6 +1,4 @@
-#!/bin/sh
-
-KEYLENGTH=4096
+#!/bin/bash
 
 unalias rm 2>/dev/null
 
@@ -17,8 +15,8 @@ fi
 for node in $*; do
     NODEBASE=node.${node}
     if [ \! \( -e ${NODEBASE}.key -o -e ${NODEBASE}.crt \) \]; then
-        openssl req -newkey rsa:$KEYLENGTH -keyout ${NODEBASE}.key.enc -out ${NODEBASE}.req -subj "/C=GO/ST=reign/CN=${node}/" -passout pass:abcd && \
-        openssl rsa -in ${NODEBASE}.key.enc -out ${NODEBASE}.key -passin pass:abcd && \
+        openssl req -newkey ec:<(openssl ecparam -name secp521r1) -keyout ${NODEBASE}.key.enc -out ${NODEBASE}.req -subj "/C=GO/ST=reign/CN=${node}/" -passout pass:abcd && \
+        openssl ec -in ${NODEBASE}.key.enc -out ${NODEBASE}.key -passin pass:abcd && \
         rm -f ${NODEBASE}.key.enc && \
         openssl x509 -req -days 3650 -in ${NODEBASE}.req -CA signing.crt -CAkey signing.key -out ${NODEBASE}.crt -CAcreateserial && \
         rm -f ${NODEBASE}.req

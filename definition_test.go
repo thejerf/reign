@@ -14,25 +14,25 @@ func jsonbytes(b []byte) string {
 }
 
 func TestJSONSpecification(t *testing.T) {
-	defer nilConnections()
+	defer setConnections(nil)
 
 	validJSON := []byte(`
 {
-    "nodes": {
-        "0": {
+    "nodes": [
+		{
+			"id": 0,
             "address": "localhost:80"
-        },
-        "1": {
-            "address": "10.2.8.33:90",
-            "listen_address": "192.18.28.22:90"
+		},
+		{	"id": 1,
+			"address": "10.2.8.33:90",
+			"listen_address": "192.18.28.22:90"
         }
-    },
-    "node_cert_pem": "` + jsonbytes(node1_1_cert) + `",
-    "node_key_pem": "` + jsonbytes(node1_1_key) + `",
-    "cluster_cert_pem": "` + jsonbytes(signing1_cert) + `"
+	],
+	"node_cert_pem": "` + jsonbytes(node1_1Cert) + `",
+	"node_key_pem": "` + jsonbytes(node1_1Key) + `",
+	"cluster_cert_pem": "` + jsonbytes(signing1Cert) + `"
 }`)
-	cluster, err := createFromJSON(validJSON, 0, NullLogger)
-	cluster.Terminate()
+	cluster, _, err := createFromJSON(validJSON, 1, NullLogger)
 	if err != nil {
 		t.Fatal("Got error constructing valid cluster:", err)
 	}
@@ -41,44 +41,55 @@ func TestJSONSpecification(t *testing.T) {
 		t.Fatal("Cluster hash not set")
 	}
 
-	nilConnections()
+	cluster.Terminate()
+
+	// Test validation of certificate's common name.
+	_, _, err = createFromJSON(validJSON, 0, NullLogger)
+	if err == nil {
+		t.Fatal("Expected an error creating the cluster.")
+	}
+
 	// Test the alternative creation methods
 	specFile, cleanup := tmpFile("spec_tmp_file", validJSON)
 	defer cleanup()
 
 	// Can we create from a good spec file?
-	service, err := CreateFromSpecFile(specFile, 0, NullLogger)
-	service.(*connectionServer).Terminate()
+	service, _, err := CreateFromSpecFile(specFile, 1, NullLogger)
 	if err != nil || service == nil {
 		t.Fatal("Error using CreateFromSpecFile:", err)
 	}
-	_, err = CreateFromSpecFile("doesnotexist", 0, NullLogger)
+	service.Terminate()
+
+	_, _, err = CreateFromSpecFile("doesnotexist", 1, NullLogger)
 	if err == nil {
 		t.Fatal("Can somehow successfully create a cluster from nonexistant file")
 	}
-	nilConnections()
 
 	// Can we create from a reader containing a good spec file?
 	goodReader, err := os.Open(specFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err = CreateFromReader(goodReader, 0, NullLogger)
-	service.(*connectionServer).Terminate()
+	defer func() {
+		if cErr := goodReader.Close(); cErr != nil {
+			t.Log(cErr)
+		}
+	}()
+	service, _, err = CreateFromReader(goodReader, 1, NullLogger)
 	if service == nil || err != nil {
 		t.Fatal("Can't create from reader properly")
 	}
-	nilConnections()
+	service.Terminate()
 
 	// and does that fail properly?
 	badReader := FakeReader{errors.New("a wacky error")}
-	service, err = createFromReader(badReader, 0, NullLogger)
+	_, _, err = createFromReader(badReader, 1, NullLogger)
 	if err == nil || connections != nil {
 		t.Fatal("bad reader still somehow yielded a cluster")
 	}
 
 	// can we create from arbitrarily-sourced JSON?
-	service, err = createFromJSON([]byte("mogglegoogly!"), 0, NullLogger)
+	_, _, err = createFromJSON([]byte("mogglegoogly!"), 1, NullLogger)
 	if err == nil {
 		t.Fatal("Lunatic JSON still somehow produced a cluster.")
 	}
@@ -89,14 +100,14 @@ func TestJSONSpecification(t *testing.T) {
 	if err != nil {
 		t.Fatal("Unexpected marshaling problem")
 	}
-	service, err = CreateFromSpec(legalSpec, 0, NullLogger)
-	service.(*connectionServer).Terminate()
+	service, _, err = CreateFromSpec(legalSpec, 1, NullLogger)
 	if err != nil {
 		t.Fatal("Can't create straight from a spec")
 	}
-	nilConnections()
-	legalSpec.Nodes = map[string]*NodeDefinition{}
-	service, err = CreateFromSpec(legalSpec, 0, NullLogger)
+	service.Terminate()
+
+	legalSpec.Nodes = []*NodeDefinition{}
+	_, _, err = CreateFromSpec(legalSpec, 1, NullLogger)
 	if err == nil {
 		t.Fatal("Can construct illegal cluster from illegal spec")
 	}
@@ -104,20 +115,19 @@ func TestJSONSpecification(t *testing.T) {
 
 // to see if this catches all errors, examine the coverage graph
 func TestJSONSpecErrors(t *testing.T) {
-	defer nilConnections()
+	defer setConnections(nil)
 
 	noNodes := []byte(`{}`)
-	cluster, err := createFromJSON(noNodes, 0, NullLogger)
-
+	cluster, _, err := createFromJSON(noNodes, 1, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("No nodes still loaded just fine.")
 	}
 
-	node1_1CertFile, cleanup := tmpFile("test_node_cert", node1_1_cert)
+	node1_1CertFile, cleanup := tmpFile("test_node_cert", node1_1Cert)
 	defer cleanup()
-	node1_1KeyFile, cleanup := tmpFile("test_node_key", node1_1_key)
+	node1_1KeyFile, cleanup := tmpFile("test_node_key", node1_1Key)
 	defer cleanup()
-	clusterCert, cleanup := tmpFile("test_cluster_cert", signing1_cert)
+	clusterCert, cleanup := tmpFile("test_cluster_cert", signing1Cert)
 	defer cleanup()
 
 	nodeErrors := []byte(`{
@@ -133,8 +143,7 @@ func TestJSONSpecErrors(t *testing.T) {
     "node_cert_path": "` + node1_1CertFile + `",
     "cluster_cert_path": "` + clusterCert + `"
 }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
-
+	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Bad data got all the errors")
 	}
@@ -146,7 +155,7 @@ func TestJSONSpecErrors(t *testing.T) {
     "node_cert_path": "alsoidontexist",
     "cluster_cert_path": "stillnotexisting"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
@@ -157,25 +166,25 @@ func TestJSONSpecErrors(t *testing.T) {
     "node_cert_pem": "mmommmo",
     "cluster_cert_pem": "not a legal pem"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
 
 	// cluster pems can fail in additional ways
 	nodeErrors = []byte(`{
-    "cluster_cert_pem": "` + jsonbytes(signing1_key) + `"
+    "cluster_cert_pem": "` + jsonbytes(signing1Key) + `"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
 
 	// illegal cert
 	nodeErrors = []byte(`{
-    "cluster_cert_pem": "` + jsonbytes(signing1_cert_corrupt) + `"
+    "cluster_cert_pem": "` + jsonbytes(signing1CertCorrupt) + `"
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
@@ -183,23 +192,24 @@ func TestJSONSpecErrors(t *testing.T) {
 	nodeErrors = []byte(`{
     "nodes": {"0": {}, "1": {}}
     }`)
-	cluster, err = createFromJSON(nodeErrors, 0, NullLogger)
+	cluster, _, err = createFromJSON(nodeErrors, 1, NullLogger)
 	if cluster != nil || err == nil {
 		t.Fatal("Unexpectedly successful cluster creation #1")
 	}
 }
 
 func TestCoverNoClustering(t *testing.T) {
-	nilConnections()
 	NoClustering()
-	connectionsL.Lock()
 	connections.Terminate()
-	connectionsL.Unlock()
-	nilConnections()
-	// FIXME: Ought to smoke test some mailbox stuff here.
+
+	if connections != nil {
+		t.Fatal("connections were not reset as expected")
+	}
 }
 
 func TestResolveLog(t *testing.T) {
+	t.Parallel()
+
 	if resolveLog(nil) != StdLogger {
 		t.Fatal("Don't get StdLogger for nil")
 	}
@@ -221,6 +231,7 @@ func tmpFile(prefix string, contents []byte) (string, func()) {
 	if tmpFile == nil || err != nil {
 		panic("Could not create tmpFile properly. Please check permissions & stuff")
 	}
+	defer tmpFile.Close()
 	l, err := tmpFile.Write(contents)
 	if err != nil {
 		panic(err)
@@ -229,7 +240,8 @@ func tmpFile(prefix string, contents []byte) (string, func()) {
 		panic("Couldn't write whole file?")
 	}
 	return tmpFile.Name(), func() {
-		err := os.Remove(tmpFile.Name())
+		n := tmpFile.Name()
+		err := os.Remove(n)
 		if err != nil {
 			panic("Couldn't remove temporary file? " + err.Error())
 		}

@@ -19,7 +19,7 @@ import (
 // * The node in a Connection with the LOWER NodeID is responsible for
 //   establishing the connection to the other node, which it will try
 //   to maintain.
-// * The connecting node performs an SSL handshake. Both sides provide
+// * The connecting node performs a SSL handshake. Both sides provide
 //   their certificates to the other, and both sides verify that the
 //   certificate has been signed.
 //
@@ -58,6 +58,20 @@ type voidtype struct{}
 
 var void = voidtype{}
 
+// ConnectionService provides an interface to the reign connectionServer and registry objects. It
+// inherits from suture.Service and reign.Cluster.
+type ConnectionService interface {
+	NewMailbox() (*Address, *Mailbox)
+	Terminate()
+
+	// Inherited from suture.Service
+	Serve()
+	Stop()
+
+	// Inherited from reign.Cluster
+	AddConnectionStatusCallback(f func(NodeID, bool))
+}
+
 // A connection serve manages the connections, both incoming and outgoing.
 // So it maintains a listener (if necessary), and maintains the outgoing
 // connections. This could, arguably, be named "node".
@@ -77,6 +91,20 @@ type connectionServer struct {
 	registry *registry
 
 	*Cluster
+}
+
+// NewMailbox creates a new tied pair of Address and Mailbox.
+//
+// A Mailbox MUST have .Terminate() called on it when you are done with
+// it. Otherwise termination notifications will not properly fire and
+// resources will leak.
+//
+// It is not safe to copy a Mailbox by value; client code should never have
+// Mailbox appearing as a non-pointer-type in its code. It is a code smell
+// to have *Mailbox used as a map key; use AddressIDs instead.
+// instead.
+func (cs *connectionServer) NewMailbox() (*Address, *Mailbox) {
+	return cs.newLocalMailbox()
 }
 
 func (cs *connectionServer) getNodes() []NodeID {
@@ -100,19 +128,24 @@ func (cs *connectionServer) waitForListen() {
 }
 
 func (cs *connectionServer) Terminate() {
-	cs.registry.Terminate()
+	if cs.registry != nil {
+		cs.registry.Terminate()
+	}
+
+	setConnections(nil)
 }
 
-func (cs *connectionServer) send(mID AddressID, msg interface{}) (err error) {
-	switch id := mID.(type) {
-	case registryMailbox:
-		return cs.registry.Send(sendRegistryMessage{id, msg})
-	case mailboxID:
-		if id.NodeID() == cs.ThisNode.ID {
-			err = cs.mailboxes.sendByID(id, msg)
-		} else {
-			err = cs.remoteMailboxes[id.NodeID()].send(internal.OutgoingMailboxMessage{internal.IntMailboxID(id), msg}, "remote mailbox message")
-		}
+func (cs *connectionServer) send(mID MailboxID, msg interface{}) (err error) {
+	if mID.NodeID() == cs.ThisNode.ID {
+		err = cs.mailboxes.sendByID(mID, msg)
+	} else {
+		err = cs.remoteMailboxes[mID.NodeID()].send(
+			internal.OutgoingMailboxMessage{
+				Target:  internal.IntMailboxID(mID),
+				Message: msg,
+			},
+			"remote mailbox message",
+		)
 	}
 	return
 }

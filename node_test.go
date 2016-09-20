@@ -23,6 +23,15 @@ import (
 	"github.com/thejerf/reign/internal"
 )
 
+func init() {
+	// PingInterval should be set to a small value so it doesn't unduly hang up heartbeat
+	// tests, yet it should be large enough so as to give reign enough time to transfer
+	// the ping message and its corresponding pong message over the network before the ping
+	// timer expires.  Since these tests (or at least the HeartbeatRoundtrip test) are using
+	// nodes whose messages are traversing localhost, 1 second should be sufficient.
+	PingInterval = time.Second * 2
+}
+
 // this goes ahead and just lets the nodes talk over the network
 
 // This function grabs the test bed and runs basic tests on it to
@@ -31,32 +40,51 @@ func TestMinimalTestBed(t *testing.T) {
 	ntb := testbed(nil)
 	defer ntb.terminate()
 
-	if ntb.addr1_1.GetID() == ntb.addr1_2.GetID() {
-		t.Fatal("Both mailboxs have the same ID")
+	if ntb.addr1_1.mailboxID == ntb.addr1_2.mailboxID {
+		t.Fatal("Both mailboxes have the same ID")
 	}
 
-	ntb.rem1_1.Send("hello")
+	// Send "hello" from node 2 for address1 on node 1, destined
+	// for mailbox1 on node 1.
+	m := "hello"
+	ntb.rem1_1.Send(m)
 
-	msg := ntb.mailbox1_1.ReceiveNext()
-	if msg.(string) != "hello" {
+	// Receive the message in mailbox1 on node 1.
+	msg, ok := ntb.mailbox1_1.ReceiveNextTimeout(timeout)
+	if !ok {
+		t.Fatalf("Did not receive %q message", m)
+	}
+	if msg.(string) != m {
 		t.Fatal("Could not send message between nodes for some reason")
 	}
 
-	ntb.rem1_2.Send("world")
-
-	msg = ntb.mailbox1_2.ReceiveNext()
-	if msg.(string) != "world" {
-		t.Fatal("Did not get expected response from 'hello'")
+	m = "world"
+	ntb.rem1_2.Send(m)
+	msg, ok = ntb.mailbox1_2.ReceiveNextTimeout(timeout)
+	if !ok {
+		t.Fatalf("Did not receive %q message", m)
+	}
+	if msg.(string) != m {
+		t.Fatalf("Did not receive the expected %q response", m)
 	}
 
-	ntb.rem1_2.Send("Checking 1_2")
-	msg = ntb.mailbox1_2.ReceiveNext()
-	if msg.(string) != "Checking 1_2" {
+	m = "Checking 1_2"
+	ntb.rem1_2.Send(m)
+	msg, ok = ntb.mailbox1_2.ReceiveNextTimeout(timeout)
+	if !ok {
+		t.Fatalf("Did not receive %q message", m)
+	}
+	if msg.(string) != m {
 		t.Fatal("Mailbox 1_2 is broken remotely.")
 	}
-	ntb.rem2_2.Send("Checking 2_2")
-	msg = ntb.mailbox2_2.ReceiveNext()
-	if msg.(string) != "Checking 2_2" {
+
+	m = "Checking 2_2"
+	ntb.rem2_2.Send(m)
+	msg, ok = ntb.mailbox2_2.ReceiveNextTimeout(timeout)
+	if !ok {
+		t.Fatalf("Did not receive %q message", m)
+	}
+	if msg.(string) != m {
 		t.Fatal("Mailbox 2_2 is broken remotely.")
 	}
 }
@@ -69,12 +97,23 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 	// where address1_1 is local. Can we then use that to send to
 	// address1_1 from the remote node?
 	ntb.rem1_2.Send(ntb.addr1_1)
-	sentAddr := ntb.mailbox1_2.ReceiveNext().(*Address)
+	sa, ok := ntb.mailbox1_2.ReceiveNextTimeout(timeout)
+	if !ok {
+		t.Fatal("No message received")
+	}
+	sentAddr, ok := sa.(*Address)
+	if !ok {
+		t.Fatal("Received message is not an Address")
+	}
+
 	// fixup the connectionServer
 	sentAddr.connectionServer = ntb.c2
 
 	sentAddr.Send("ack")
-	received := ntb.mailbox1_1.ReceiveNext()
+	received, ok := ntb.mailbox1_1.ReceiveNextTimeout(timeout)
+	if !ok {
+		t.Fatal("No message received")
+	}
 	if received.(string) != "ack" {
 		t.Fatal("Can not marshal around mailbox references.")
 	}
@@ -83,11 +122,13 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 // Little tests which just get some coverage out of the way.
 func TestCoverage(t *testing.T) {
 	ntb := testbed(nil)
-	defer ntb.terminate()
 
 	if !panics(func() { newConnections(nil, NodeID(1)) }) {
 		t.Fatal("Didn't panic with bad newConnections: no cluster")
 	}
+
+	ntb.terminate()
+
 	c := &Cluster{}
 	if !panics(func() { newConnections(c, NodeID(1)) }) {
 		t.Fatal("Didn't panic with bad newConnections: no clusterlogger")
@@ -100,10 +141,10 @@ func TestCoverage(t *testing.T) {
 		t.Fatal("createFromSpec does not object to double-creating connections")
 	}
 
-	var err error
-	nilConnections()
-	_, err = createFromSpec(testSpec(), 10, NullLogger)
-	if err.Error() != "the node claimed to be the local node is not defined" {
+	setConnections(nil)
+
+	_, _, err := createFromSpec(testSpec(), 10, NullLogger)
+	if err != errNodeNotDefined {
 		t.Fatal("Failed to verify the claimed local node is in the cluster")
 	}
 }
@@ -133,9 +174,12 @@ func TestHappyPathRemoteLink(t *testing.T) {
 	// now that we know the listens are all set up "correctly", let's see
 	// if we get the terminate.
 	ntb.mailbox1_2.Terminate()
-	termNotice := ntb.mailbox1_1.ReceiveNext()
-	if termNotice.(mailboxID) != ntb.mailbox1_2.getID() {
-		t.Fatal("Got a termination notice for the wrong mailbox.")
+	termNotice, ok := ntb.mailbox1_1.ReceiveNextTimeout(timeout)
+	if !ok {
+		t.Fatal("No message received")
+	}
+	if MailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
+		t.Fatal("Received a termination notice for the wrong mailbox")
 	}
 }
 
@@ -169,9 +213,12 @@ func TestHappyPathPartialUnnotify(t *testing.T) {
 	<-gotUnnotifyRemote
 	// now, ensure that we still get notified on the remaining address
 	ntb.mailbox1_2.Terminate()
-	termNotice := ntb.mailbox1_2.ReceiveNext()
-	if termNotice.(mailboxID) != ntb.mailbox1_2.getID() {
-		t.Fatal("didn't get the right termination notice or something:", termNotice)
+	termNotice, ok := ntb.mailbox1_2.ReceiveNextAsync()
+	if !ok {
+		t.Fatal("No message received")
+	}
+	if MailboxID(termNotice.(MailboxTerminated)) != ntb.mailbox1_2.id {
+		t.Fatal("Did not receive the right termination notice:", termNotice)
 	}
 }
 
@@ -205,9 +252,14 @@ func TestRemoteLinkErrorPaths(t *testing.T) {
 	ntb := testbed(nil)
 	defer ntb.terminate()
 
+	setConnections(ntb.c1)
+
 	// Send the remoteMailbox a message for the wrong node. (Verified that
 	// this goes down the right code path via coverage analysis.)
-	ntb.remote2to1.Send(&internal.IncomingMailboxMessage{internal.IntMailboxID(ntb.mailbox1_1.getID().(mailboxID)), "moo"})
+	ntb.remote2to1.Send(&internal.IncomingMailboxMessage{
+		Target:  internal.IntMailboxID(ntb.mailbox1_1.id),
+		Message: "moo",
+	})
 	time.Sleep(time.Second)
 }
 
@@ -231,9 +283,12 @@ func TestConnectionPanicsServer(t *testing.T) {
 	defer ntb.terminate()
 
 	c := make(chan struct{})
+
+	ntb.remote1to2.Lock()
 	ntb.remote1to2.connectionEstablished = func() {
 		c <- struct{}{}
 	}
+	ntb.remote1to2.Unlock()
 
 	ntb.remote1to2.Send(internal.PanicHandler{})
 
@@ -260,13 +315,48 @@ func TestConnectionDiesServer(t *testing.T) {
 	defer ntb.terminate()
 
 	c := make(chan struct{})
+
+	ntb.remote1to2.Lock()
 	ntb.remote1to2.connectionEstablished = func() {
 		c <- struct{}{}
 	}
+	ntb.remote1to2.Unlock()
 
 	ntb.remote1to2.Send(internal.DestroyConnection{})
 
 	<-c
+}
+
+func TestHeartbeatRoundtrip(t *testing.T) {
+	ntb := testbed(nil)
+	defer ntb.terminate()
+
+	// Set the peekFunc() on c1's node connection to c2 object.
+	c := make(chan internal.ClusterMessage)
+	ntb.c1.nodeConnectors[2].connection.setPeekFunc(func(cm internal.ClusterMessage) { c <- cm })
+
+	var recPing, recPong bool
+
+	// Take a peek at the first two messages. The only messages sent between nodes of
+	// this ntb should be alternating PING and PONG messages.  Make sure we get one
+	// of each.
+	for i := 0; i < 2; i++ {
+		switch cm := <-c; cm.(type) {
+		case *internal.Ping:
+			recPing = true
+		case *internal.Pong:
+			recPong = true
+		default:
+			t.Errorf("received unexpected message type: %#v", cm)
+		}
+	}
+
+	switch {
+	case recPing && !recPong:
+		t.Error("received two PING messages but no PONG messages; the PingInterval may be too short")
+	case !recPing && recPong:
+		t.Error("received two PONG messages but no PING messages; something is very wrong")
+	}
 }
 
 func TestCoverRemoteMailboxes(t *testing.T) {
