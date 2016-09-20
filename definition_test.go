@@ -115,7 +115,7 @@ func TestJSONSpecification(t *testing.T) {
 
 // to see if this catches all errors, examine the coverage graph
 func TestJSONSpecErrors(t *testing.T) {
-	t.Parallel()
+	defer setConnections(nil)
 
 	noNodes := []byte(`{}`)
 	cluster, _, err := createFromJSON(noNodes, 1, NullLogger)
