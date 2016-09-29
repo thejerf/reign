@@ -243,28 +243,28 @@ func (r *registry) Serve() {
 		message := r.ReceiveNext()
 		switch msg := message.(type) {
 		case internal.RegisterName: // Received locally
-			r.register(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
+			r.register(msg.Name, MailboxID(msg.MailboxID))
 
 			if NodeID(msg.Node) == r.thisNode {
 				r.toOtherNodes(msg)
 			}
 
 		case *internal.RegisterName: // Received over the socket, decoded by gob
-			r.register(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
+			r.register(msg.Name, MailboxID(msg.MailboxID))
 
 		case internal.UnregisterName:
-			r.unregister(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
+			r.unregister(msg.Name, MailboxID(msg.MailboxID))
 
 			if NodeID(msg.Node) == r.thisNode {
 				r.toOtherNodes(msg)
 			}
 
 		case *internal.UnregisterName:
-			r.unregister(NodeID(msg.Node), msg.Name, MailboxID(msg.MailboxID))
+			r.unregister(msg.Name, MailboxID(msg.MailboxID))
 
 			// This should only be called internally
 		case internal.UnregisterMailbox:
-			r.unregisterMailbox(NodeID(msg.Node), MailboxID(msg.MailboxID))
+			r.unregisterMailbox(MailboxID(msg.MailboxID))
 
 		case connectionStatus:
 			// HERE: Handling this and the errors in mailbox.go
@@ -323,10 +323,9 @@ func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
 }
 
 func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
-	node := NodeID(msg.Node)
 	for name, mailboxIDs := range msg.Claims {
 		for intMailboxID := range mailboxIDs {
-			r.register(node, name, MailboxID(intMailboxID))
+			r.register(name, MailboxID(intMailboxID))
 		}
 	}
 }
@@ -347,7 +346,7 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 	for name, claimants := range r.claims {
 		for claimant := range claimants {
 			if claimant.NodeID() == msg.node {
-				r.unregister(msg.node, name, claimant)
+				r.unregister(name, claimant)
 			}
 		}
 	}
@@ -449,7 +448,7 @@ func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 }
 
 // register is the internal registration function.
-func (r *registry) register(node NodeID, name string, mID MailboxID) {
+func (r *registry) register(name string, mID MailboxID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -482,7 +481,7 @@ func (r *registry) register(node NodeID, name string, mID MailboxID) {
 // this results in the last registry for a given name being removed, we
 // check for anyone currently waiting for a termination notice on that
 // name and send it.
-func (r *registry) unregister(node NodeID, name string, mID MailboxID) {
+func (r *registry) unregister(name string, mID MailboxID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -498,12 +497,12 @@ func (r *registry) unregister(node NodeID, name string, mID MailboxID) {
 }
 
 // unregisterMailbox unregisters all names associated with the given mailbox ID
-func (r *registry) unregisterMailbox(node NodeID, mID MailboxID) {
+func (r *registry) unregisterMailbox(mID MailboxID) {
 	// TODO: make this more efficient?
 	for name, claimants := range r.claims {
 		for claimant := range claimants {
 			if claimant == mID {
-				r.unregister(node, name, claimant)
+				r.unregister(name, claimant)
 			}
 		}
 	}
@@ -533,15 +532,15 @@ func (r *registry) DumpJSON() string {
 	return string(j)
 }
 
-func (r *registry) AddressCount() uint {
+func (r *registry) AddressCount() (count uint) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	count := uint(0)
 	for _, addresses := range r.claims {
 		count += uint(len(addresses))
 	}
-	return count
+
+	return
 }
 
 func (r *registry) AllNames() []string {
