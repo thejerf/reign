@@ -70,6 +70,11 @@ import (
 	"github.com/thejerf/reign/internal"
 )
 
+func init() {
+	var mc MultipleClaim
+	RegisterType(mc)
+}
+
 // ErrNoAddressRegistered is returned when there are no addresses at
 // the given name.
 var ErrNoAddressRegistered = errors.New("no address is registered with that name")
