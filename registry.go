@@ -90,8 +90,8 @@ var ErrCantGloballyRegister = errors.New("can't globally register this address")
 // and that the "current" situation (to the extent that is definable)
 // may change at any time.
 type MultipleClaim struct {
-	claimants []Address
-	name      string
+	Claimants []Address
+	Name      string
 }
 
 type stopRegistry struct{}
