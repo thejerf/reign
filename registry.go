@@ -156,6 +156,8 @@ type Names interface {
 // taking out the lock (registry.m).  Most of the functionality required can
 // be accessed through the publically-exposed (uppercase) methods.
 type registry struct {
+	ClusterLogger
+
 	mu sync.Mutex
 
 	// the set of all claims understood by the local node, organized as
@@ -191,7 +193,7 @@ type NamesDebugger interface {
 // conceptually, I consider this inline with the newConnections function,
 // since this deeply depends on the order of parameters initialized in the
 // &connectionServer{} in an otherwise icky way...
-func newRegistry(cs *connectionServer, node NodeID) *registry {
+func newRegistry(cs *connectionServer, node NodeID, log ClusterLogger) *registry {
 	if cs == nil {
 		panic("registry connection server cannot be nil")
 	}
@@ -200,6 +202,7 @@ func newRegistry(cs *connectionServer, node NodeID) *registry {
 		claims:         make(map[string]map[MailboxID]voidtype),
 		nodeRegistries: make(map[NodeID]Address),
 		thisNode:       node,
+		ClusterLogger:  log,
 	}
 
 	r.Address, r.Mailbox = cs.newLocalMailbox()
@@ -211,6 +214,7 @@ func newRegistry(cs *connectionServer, node NodeID) *registry {
 }
 
 func (r *registry) Terminate() {
+	r.Tracef("Terminating registry on node %d", r.thisNode)
 	r.Mailbox.Terminate()
 }
 
@@ -223,6 +227,7 @@ func (r *registry) addNodeRegistry(n NodeID, a Address) {
 	defer r.mu.Unlock()
 
 	r.nodeRegistries[n] = a
+	r.Tracef("Added address %q on node %d to the node registry", a.String(), n)
 }
 
 func (r *registry) connectionStatusCallback(node NodeID, connected bool) {
@@ -240,7 +245,7 @@ func (r *registry) String() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return fmt.Sprintf("registry on node %d", r.thisNode)
+	return fmt.Sprintf("Registry on node %d", r.thisNode)
 }
 
 func (r *registry) Serve() {
@@ -315,14 +320,18 @@ func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
 	}
 
 	for name, mailboxIDs := range r.claims {
-		if _, ok := anc.Claims[name]; !ok {
-			anc.Claims[name] = make(map[internal.IntMailboxID]struct{})
-		}
-
 		for intMailbox := range mailboxIDs {
-			anc.Claims[name][internal.IntMailboxID(intMailbox)] = struct{}{}
+			if intMailbox.NodeID() == r.thisNode {
+				if _, ok := anc.Claims[name]; !ok {
+					anc.Claims[name] = make(map[internal.IntMailboxID]struct{})
+				}
+
+				anc.Claims[name][internal.IntMailboxID(intMailbox)] = struct{}{}
+			}
 		}
 	}
+
+	r.Tracef("Sending the following claims: %#v", anc)
 
 	return anc
 }
@@ -330,6 +339,12 @@ func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
 func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 	for name, mailboxIDs := range msg.Claims {
 		for intMailboxID := range mailboxIDs {
+			// Sanity check.
+			if intMailboxID.NodeID() != msg.Node {
+				r.Warnf("Omitting mailbox ID %x from registry sync because it's not local to node %d", intMailboxID, msg.Node)
+				continue
+			}
+
 			r.register(name, MailboxID(intMailboxID))
 		}
 	}
@@ -343,6 +358,8 @@ func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 // up. But when the connection goes down, we do need to unregister all
 // the claims on that node.
 func (r *registry) handleConnectionStatus(msg connectionStatus) {
+	r.Tracef("Handling connection status change: %#v", msg)
+
 	if msg.connected {
 		return
 	}
@@ -392,6 +409,8 @@ func (r *registry) Lookup(s string) *Address {
 	// Pick a random ID from our list of IDs registered to this name and return it
 	id := claimIDs[rand.Intn(len(claims))]
 
+	r.Tracef("Lookup for %q returned MailboxID %x", s, id)
+
 	return &Address{
 		mailboxID:        id,
 		connectionServer: r.connectionServer,
@@ -410,6 +429,8 @@ func (r *registry) Register(name string, addr *Address) error {
 	if !addr.canBeGloballyRegistered() {
 		return ErrCantGloballyRegister
 	}
+
+	r.Tracef("Registering %q with address %x on this node", name, addr.mailboxID)
 
 	// only mailboxID can pass the canBeGloballyRegistered test above
 	return r.Send(internal.RegisterName{
@@ -432,6 +453,8 @@ func (r *registry) Unregister(name string, addr *Address) {
 		return
 	}
 
+	r.Tracef("Unregistrering %q with address %x on this node", name, addr.mailboxID)
+
 	// at the moment, only mailboxID can pass the check above
 	r.Send(internal.UnregisterName{
 		Node:      internal.IntNodeID(r.thisNode),
@@ -445,6 +468,7 @@ func (r *registry) Unregister(name string, addr *Address) {
 // every name associated with mID.
 func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 	if mID.NodeID() == node && node == r.thisNode && r.mailboxID != mID {
+		r.Tracef("Unregistering mailbox %x on this node", mID)
 		r.Send(internal.UnregisterMailbox{
 			Node:      internal.IntNodeID(node),
 			MailboxID: internal.IntMailboxID(mID),
@@ -459,7 +483,7 @@ func (r *registry) register(name string, mID MailboxID) {
 
 	nameClaimants, haveNameClaimants := r.claims[name]
 	if !haveNameClaimants {
-		nameClaimants = map[MailboxID]voidtype{}
+		nameClaimants = make(map[MailboxID]voidtype)
 		r.claims[name] = nameClaimants
 	}
 
@@ -477,6 +501,7 @@ func (r *registry) register(name string, mID MailboxID) {
 			claimants = append(claimants, addr)
 		}
 		for _, addr := range claimants {
+			r.Tracef("Sending MultipleClaim for %q to %x", name, addr.mailboxID)
 			addr.Send(MultipleClaim{claimants, name})
 		}
 	}

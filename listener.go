@@ -387,6 +387,11 @@ func (ic *incomingConnection) handleIncomingMessages() {
 		pong internal.ClusterMessage = internal.Pong{}
 		done                         = make(chan struct{})
 	)
+
+	// Report the successful connection, and defer the disconnection status change call.
+	ic.connectionServer.changeConnectionStatus(ic.client.ID, true)
+	defer ic.connectionServer.changeConnectionStatus(ic.client.ID, false)
+
 	defer close(done)
 
 	ic.resetConnectionDeadline(DeadlineInterval)
@@ -437,7 +442,7 @@ func (ic *incomingConnection) handleIncomingMessages() {
 		case io.EOF:
 			ic.Errorf("Connection to node ID %v has gone down", ic.client.ID)
 		default:
-			panic(fmt.Sprintf("Error decoding message: %s", err.Error()))
+			panic(fmt.Sprintf("Error decoding message: %s", err))
 		}
 	}
 }
