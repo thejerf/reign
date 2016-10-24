@@ -70,11 +70,6 @@ import (
 	"github.com/thejerf/reign/internal"
 )
 
-func init() {
-	var mc MultipleClaim
-	RegisterType(mc)
-}
-
 // ErrNoAddressRegistered is returned when there are no addresses at
 // the given name.
 var ErrNoAddressRegistered = errors.New("no address is registered with that name")
@@ -90,8 +85,8 @@ var ErrCantGloballyRegister = errors.New("can't globally register this address")
 // and that the "current" situation (to the extent that is definable)
 // may change at any time.
 type MultipleClaim struct {
-	Claimants []Address
-	Name      string
+	claimants []Address
+	name      string
 }
 
 type stopRegistry struct{}

@@ -269,8 +269,8 @@ func TestInternalAllNodeClaims(t *testing.T) {
 			if _, ok := mc.(MultipleClaim); !ok {
 				t.Fatalf("Did not expect message of type %#v", mc)
 			} else {
-				if mc.(MultipleClaim).Name != name {
-					t.Fatalf("Expected name to be '%v'. Got '%v'", name, mc.(MultipleClaim).Name)
+				if mc.(MultipleClaim).name != name {
+					t.Fatalf("Expected name to be '%v'. Got '%v'", name, mc.(MultipleClaim).name)
 				}
 			}
 		}
