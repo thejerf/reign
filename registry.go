@@ -320,14 +320,18 @@ func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
 	}
 
 	for name, mailboxIDs := range r.claims {
+		if _, ok := anc.Claims[name]; !ok {
+			anc.Claims[name] = make(map[internal.IntMailboxID]struct{})
+		}
+
 		for intMailbox := range mailboxIDs {
 			if intMailbox.NodeID() == r.thisNode {
-				if _, ok := anc.Claims[name]; !ok {
-					anc.Claims[name] = make(map[internal.IntMailboxID]struct{})
-				}
-
 				anc.Claims[name][internal.IntMailboxID(intMailbox)] = struct{}{}
 			}
+		}
+
+		if len(anc.Claims[name]) == 0 {
+			delete(anc.Claims, name)
 		}
 	}
 
