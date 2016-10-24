@@ -346,6 +346,7 @@ func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 			}
 
 			r.register(name, MailboxID(intMailboxID))
+			r.Tracef("Synced mailbox %x for %q", intMailboxID, name)
 		}
 	}
 }
@@ -364,11 +365,11 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 		return
 	}
 
-	// TODO: make this more efficient?
 	for name, claimants := range r.claims {
 		for claimant := range claimants {
 			if claimant.NodeID() == msg.node {
 				r.unregister(name, claimant)
+				r.Tracef("Unregistered mailbox %x for %q", claimant, name)
 			}
 		}
 	}
@@ -501,7 +502,7 @@ func (r *registry) register(name string, mID MailboxID) {
 			claimants = append(claimants, addr)
 		}
 		for _, addr := range claimants {
-			r.Tracef("Sending MultipleClaim for %q to %x", name, addr.mailboxID)
+			r.Tracef("Sending MultipleClaim for %q to Address %x", name, addr.mailboxID)
 			addr.Send(MultipleClaim{claimants, name})
 		}
 	}

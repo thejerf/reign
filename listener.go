@@ -76,7 +76,7 @@ func (nl *nodeListener) waitForListen() {
 		nl.condition.Wait()
 	}
 	nl.Unlock()
-	nl.Trace("Listener successfully waited for")
+	nl.Trace("Listener ready")
 }
 
 func (nl *nodeListener) String() string {
@@ -110,13 +110,13 @@ func (nl *nodeListener) Serve() {
 
 	if nl.node.listenaddr == nil {
 		nl.Unlock()
-		panic(fmt.Sprintf("Can't start listener for node %d because we have no ListenAddress", nl.node.ID))
+		panic(fmt.Sprintf("Cannot start listener for node %d because we have no ListenAddress", nl.node.ID))
 	}
 
 	listener, err := net.ListenTCP("tcp", nl.node.listenaddr)
 	if err != nil {
 		nl.Unlock()
-		panic(fmt.Sprintf("Can't start listener on node %d because while trying to listen we received: %s", nl.node.ID, err.Error()))
+		panic(fmt.Sprintf("Cannot start listener on node %d because while trying to listen we received: %s", nl.node.ID, err.Error()))
 	}
 
 	nl.listener = listener
@@ -234,21 +234,21 @@ func (ic *incomingConnection) handleConnection() {
 		}
 	}()
 
-	ic.Tracef("Listener for %d got connection", ic.server.ID)
+	ic.Tracef("Node %d listener got connection", ic.server.ID)
 	err := ic.sslHandshake()
 	if err != nil {
 		// FIXME: This ought to wrap the error somehow, not smash to string,
 		// which would frankly be hypocritical
 		panic("Could not SSL handshake the incoming connection: " + err.Error())
 	}
-	ic.Tracef("Listener for %d successfully SSL'ed", ic.server.ID)
+	ic.Tracef("Node %d listener successfully SSL'ed", ic.server.ID)
 
 	err = ic.clusterHandshake()
 	if err != nil {
 		ic.Errorf("Could not cluster handshake the incoming connection: " + err.Error())
 		return
 	}
-	ic.Tracef("Listener for %d successfully cluster handshook", ic.server.ID)
+	ic.Tracef("Node %d listener successfully cluster handshook", ic.server.ID)
 
 	ic.remoteMailboxes = ic.mailboxesForNode(ic.client.ID)
 	ic.remoteMailboxes.setConnection(ic)
@@ -257,17 +257,17 @@ func (ic *incomingConnection) handleConnection() {
 	// Synchronize registry with the remote node.
 	err = ic.registrySync()
 	if err != nil {
-		ic.Errorf("Could not sync registry with node %v: %s", ic.client.ID, err.Error())
+		ic.Errorf("Could not sync registry with node %d: %s", ic.client.ID, err.Error())
 		return
 	}
-	ic.Tracef("Listener for %d successfully synced registry", ic.server.ID)
+	ic.Tracef("Node %d listener successfully synced registry", ic.server.ID)
 
 	ic.handleIncomingMessages()
 }
 
 // FIXME: This ought to be refactored with the node
 func (ic *incomingConnection) sslHandshake() (err error) {
-	ic.Tracef("Listener for %d in sslHandshake", ic.server.ID)
+	ic.Tracef("Node %d listener in sslHandshake", ic.server.ID)
 	// FIXME: Demeter is yelling at me here.
 	if ic.nodeListener.failOnSSLHandshake {
 		err = errors.New("ssl handshake simulating failure")
@@ -276,7 +276,7 @@ func (ic *incomingConnection) sslHandshake() (err error) {
 	}
 	tlsConfig := ic.nodeListener.connectionServer.Cluster.tlsConfig(ic.server.ID)
 	tls := tls.Server(ic.conn, tlsConfig)
-	ic.Tracef("Listener for %d made the tlsConn, handshaking", ic.server.ID)
+	ic.Tracef("Node %d listener made the tlsConn, handshaking", ic.server.ID)
 
 	err = tls.Handshake()
 	if err != nil {
@@ -310,7 +310,7 @@ func (ic *incomingConnection) clusterHandshake() (err error) {
 	yourNodeID := NodeID(clientHandshake.YourNodeID)
 
 	if clientHandshake.ClusterVersion != clusterVersion {
-		ic.Warnf("Remote node %d claimed unknown cluster version %v, proceding in the hope that this will all just work out somehow...",
+		ic.Warnf("Remote node %d claimed unknown cluster version %v, proceeding in the hope that this will all just work out somehow...",
 			clientHandshake.MyNodeID, clientHandshake.ClusterVersion)
 	}
 	if yourNodeID != ic.nodeListener.connectionServer.Cluster.ThisNode.ID {
@@ -320,7 +320,7 @@ func (ic *incomingConnection) clusterHandshake() (err error) {
 
 	clientNodeDefinition, exists := ic.nodeListener.connectionServer.Cluster.Nodes[myNodeID]
 	if !exists {
-		ic.Errorf("Connecting node claims to have ID %d, but I don't have a definition for that node.", clientHandshake.MyNodeID)
+		ic.Errorf("Connecting node claims to be node %d, but I don't have a definition for that node ID.", clientHandshake.MyNodeID)
 	}
 	ic.client = clientNodeDefinition
 
