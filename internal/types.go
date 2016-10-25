@@ -56,7 +56,7 @@ type IntMailboxID uint64
 
 // NodeID returns the node ID corresponding to the current mailbox ID.
 func (mID IntMailboxID) NodeID() IntNodeID {
-	return IntNodeID(uint64(mID) & 255)
+	return IntNodeID(mID & 255)
 }
 
 // AllNodeClaims is part of the internal registry's private communication.

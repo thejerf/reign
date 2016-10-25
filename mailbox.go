@@ -360,7 +360,7 @@ type MailboxID uint64
 
 // NodeID returns the node ID corresponding to the current mailbox ID.
 func (mID MailboxID) NodeID() NodeID {
-	return NodeID(uint64(mID) & 255)
+	return NodeID(mID & 255)
 }
 
 func (mID MailboxID) mailboxOnlyID() uint64 {
