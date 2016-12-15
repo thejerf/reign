@@ -327,7 +327,6 @@ func (rm *remoteMailboxes) Serve() {
 			return
 
 		default:
-			fmt.Printf("Unexpected message received: %#v", msg)
 			rm.Errorf("Unexpected message arrived in our node mailbox: %#v", msg)
 		}
 	}
