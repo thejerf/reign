@@ -14,37 +14,36 @@ import (
 )
 
 func init() {
-	var anc AllNodeClaims
-	gob.Register(&anc)
-
-	var rm RegistryMailbox
-	gob.Register(&rm)
-
-	var rn RegisterName
-	gob.Register(&rn)
-
-	var un UnregisterName
-	gob.Register(&un)
-
 	var nnot NotifyNodeOnTerminate
+	var _ ClusterMessage = (*NotifyNodeOnTerminate)(nil)
 	gob.Register(&nnot)
 
 	var rmt RemoteMailboxTerminated
+	var _ ClusterMessage = (*RemoteMailboxTerminated)(nil)
 	gob.Register(&rmt)
 
 	var rnnot RemoveNotifyNodeOnTerminate
+	var _ ClusterMessage = (*RemoveNotifyNodeOnTerminate)(nil)
 	gob.Register(&rnnot)
 
 	var omm OutgoingMailboxMessage
+	var _ ClusterMessage = (*OutgoingMailboxMessage)(nil)
 	gob.Register(&omm)
 
 	var imm IncomingMailboxMessage
+	var _ ClusterMessage = (*IncomingMailboxMessage)(nil)
 	gob.Register(&imm)
 
+	var ph PanicHandler
+	var _ ClusterMessage = (*PanicHandler)(nil)
+	gob.Register(&ph)
+
 	var ping Ping
+	var _ ClusterMessage = (*Ping)(nil)
 	gob.Register(&ping)
 
 	var pong Pong
+	var _ ClusterMessage = (*Pong)(nil)
 	gob.Register(&pong)
 }
 
@@ -170,10 +169,6 @@ type UnnotifyRemote struct {
 }
 
 func (ur UnnotifyRemote) isClusterMessage() {}
-
-type ConnectionLost struct{}
-
-func (cl ConnectionLost) isClusterMessage() {}
 
 // PanicHandler can be sent over the network to cause the receiver
 // to panic, simulating whatever may end up doing that.
