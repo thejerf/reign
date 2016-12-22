@@ -90,8 +90,7 @@ var ErrCantGloballyRegister = errors.New("can't globally register this address")
 // and that the "current" situation (to the extent that is definable)
 // may change at any time.
 type MultipleClaim struct {
-	Claimants []Address
-	Name      string
+	Name string
 }
 
 type stopRegistry struct{}
@@ -507,7 +506,7 @@ func (r *registry) register(name string, mID MailboxID) {
 		}
 		for _, addr := range claimants {
 			r.Tracef("Sending MultipleClaim for %q to Address %x", name, addr.mailboxID)
-			addr.Send(MultipleClaim{Claimants: claimants, Name: name})
+			addr.Send(MultipleClaim{Name: name})
 		}
 	}
 }
