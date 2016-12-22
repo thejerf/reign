@@ -1,11 +1,11 @@
-reign
-=====
+reign 0.9.0
+===========
 
 [![Build Status](https://travis-ci.org/thejerf/reign.png?branch=master)](https://travis-ci.org/thejerf/reign)
 
-Reign, "Rewrite Erlang In Go Nicely", is designed to make it easy to port Erlang
-or Erlang-style programs into Go by providing a framework for Erlang-style
-message passing, _including the creation of clusters_.
+Reign, "Rewrite Erlang In Go Nicely", is designed to make it easy to port
+Erlang or Erlang-style programs into Go by providing a framework for
+Erlang-style message passing, _including the creation of clusters_.
 
 That is, this is not intended to be a "hey, look, if I wrap a mutex around
 a slice I get something that looks like a PID" four hours of screwing
@@ -14,14 +14,13 @@ replacement for Erlang-style message passing functionality, suitable for
 porting existing Erlang programs out of Erlang without significant
 architecture overhauls.
 
-Status update, Jan 12 2016: This is not dead, it's just that as described
-below there's not much point sharing it until it is working enough to
-contribute to it. Currently the coworker I have working on this is hoping
-to get it to release quality before Gophercon in July. Work is continuing.
-Scope has even grown a bit.
+As of December 2016: The system that this was written for is now in
+production, though it's still early days. However, I still need to
+take a pass on this to ensure test coverage and documentation quality
+for public consumption.
 
-That said, it is not there yet. The local message passing functionality is,
-I believe, correct and API-stable, but the clustering is still in progress.
+However, it is now to the point that if you want to take this for a
+spin, it is "supposed" to work. Hence I'm setting the version to 0.9.0.
 
 PLEASE DO NOT SUBMIT TO REDDIT, HACKER NEWS, ETC... while I'd like to put
 this on there eventually, first I'd like the examples, coverage, working
@@ -58,6 +57,5 @@ connections. See the README.certificate.md for information about how to
 create the requisite certificates.
 
 Preliminary benchmarking seems to indicate that the overhead of running
-everything through SSL is negligible, so an earlier feature allowing you to
-choose whether you use it has been eliminated since it added significant
-complexity and danger with no benefits.
+everything through SSL is negligible once it is negotiated, dominated
+by the other costs of clustering.
