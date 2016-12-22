@@ -291,8 +291,6 @@ func (ic *incomingConnection) sslHandshake() (err error) {
 	return nil
 }
 
-// FIXME: Eliminate localNode in favor of the Cluster's ThisNode field
-
 func (ic *incomingConnection) clusterHandshake() (err error) {
 	if ic.nodeListener.failOnClusterHandshake {
 		ic.terminate()
