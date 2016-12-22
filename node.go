@@ -379,6 +379,11 @@ func (nc *nodeConnection) handleIncomingMessages() {
 		pong internal.ClusterMessage = internal.Pong{}
 		done                         = make(chan struct{})
 	)
+
+	// Report the successful connection, and defer the disconnection status change call.
+	nc.connectionServer.changeConnectionStatus(nc.dest.ID, true)
+	defer nc.connectionServer.changeConnectionStatus(nc.dest.ID, false)
+
 	defer close(done)
 
 	nc.Tracef("Connection %d -> %d in handleIncomingMessages", nc.source.ID, nc.dest.ID)

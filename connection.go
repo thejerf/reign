@@ -166,7 +166,7 @@ func newConnections(cluster *Cluster, myNodeID NodeID) *connectionServer {
 		nodeConnectors: make(map[NodeID]*nodeConnector),
 	}
 	newConnections.mailboxes = newMailboxes(newConnections, myNodeID)
-	newConnections.registry = newRegistry(newConnections, myNodeID)
+	newConnections.registry = newRegistry(newConnections, myNodeID, cluster.ClusterLogger)
 
 	l := cluster.ClusterLogger
 
