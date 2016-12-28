@@ -22,43 +22,44 @@ var timeout = time.Second
 // majority of the test suite is just testing two nodes connected together.
 // (Possibly the whole thing, but we'll see.)
 type NetworkTestBed struct {
-	c1 *connectionServer
-	c2 *connectionServer
+	node1connectionServer *connectionServer
+	node2connectionServer *connectionServer
 
-	mailbox1_1 *Mailbox
-	addr1_1    *Address
-	mailbox2_1 *Mailbox
-	addr2_1    *Address
+	node1mailbox1 *Mailbox
+	node1address1 *Address
+	node1mailbox2 *Mailbox
+	node1address2 *Address
 
-	mailbox1_2 *Mailbox
-	addr1_2    *Address
-	mailbox2_2 *Mailbox
-	addr2_2    *Address
+	node2mailbox1 *Mailbox
+	node2address1 *Address
+	node2mailbox2 *Mailbox
+	node2address2 *Address
 
 	// These "remote" addresses are all bound to the address indicated
 	// by their suffix, from the point of view of the "other" node, so
-	// rem1_1 indicates the 1_1 Mailbox from the point of view of node 2.
-	rem1_1 *Address
-	rem1_2 *Address
-	rem2_1 *Address
-	rem2_2 *Address
+	// fromNode2toNode1mailbox1 indicates the node 1's mailbox 1 from the
+	// point of view of node 2.
+	fromNode2toNode1mailbox1 *Address
+	fromNode2toNode1mailbox2 *Address
+	fromNode1toNode2mailbox1 *Address
+	fromNode1toNode2mailbox2 *Address
 
-	remote1to2 *remoteMailboxes
-	remote2to1 *remoteMailboxes
+	node1remoteMailboxes *remoteMailboxes
+	node2remoteMailboxes *remoteMailboxes
 }
 
 func (ntb *NetworkTestBed) terminateServers() {
-	ntb.c1.Stop()
-	ntb.c2.Stop()
+	ntb.node1connectionServer.Stop()
+	ntb.node2connectionServer.Stop()
 }
 
 func (ntb *NetworkTestBed) terminateMailboxes() {
-	ntb.mailbox1_1.Terminate()
-	ntb.mailbox2_1.Terminate()
-	ntb.mailbox1_2.Terminate()
-	ntb.mailbox2_2.Terminate()
-	ntb.c1.Terminate()
-	ntb.c2.Terminate()
+	ntb.node1mailbox1.Terminate()
+	ntb.node1mailbox2.Terminate()
+	ntb.node2mailbox1.Terminate()
+	ntb.node2mailbox2.Terminate()
+	ntb.node1connectionServer.Terminate()
+	ntb.node2connectionServer.Terminate()
 }
 
 func (ntb *NetworkTestBed) terminate() {
@@ -76,14 +77,14 @@ func (ntb *NetworkTestBed) terminate() {
 func (ntb *NetworkTestBed) with1(f func()) {
 	connectionsL.Lock()
 	defer connectionsL.Unlock()
-	connections = ntb.c1
+	connections = ntb.node1connectionServer
 	f()
 }
 
 func (ntb *NetworkTestBed) with2(f func()) {
 	connectionsL.Lock()
 	defer connectionsL.Unlock()
-	connections = ntb.c2
+	connections = ntb.node2connectionServer
 	f()
 }
 
@@ -110,7 +111,7 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	spec.NodeKeyPEM = string(node2_1Key)
 	spec.NodeCertPEM = string(node2_1Cert)
 	setConnections(nil)
-	ntb.c2, _, err = createFromSpec(spec, 2, NullLogger)
+	ntb.node2connectionServer, _, err = createFromSpec(spec, 2, NullLogger)
 	if err != nil {
 		panic(err)
 	}
@@ -118,43 +119,43 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 
 	spec.NodeKeyPEM = string(node1_1Key)
 	spec.NodeCertPEM = string(node1_1Cert)
-	ntb.c1, _, err = createFromSpec(spec, 1, NullLogger)
+	ntb.node1connectionServer, _, err = createFromSpec(spec, 1, NullLogger)
 	if err != nil {
 		panic(err)
 	}
 
-	setConnections(ntb.c1)
-	ntb.addr1_1, ntb.mailbox1_1 = connections.NewMailbox()
-	ntb.addr1_1.connectionServer = ntb.c1
-	ntb.addr2_1, ntb.mailbox2_1 = connections.NewMailbox()
-	ntb.addr2_1.connectionServer = ntb.c1
+	setConnections(ntb.node1connectionServer)
+	ntb.node1address1, ntb.node1mailbox1 = connections.NewMailbox()
+	ntb.node1address1.connectionServer = ntb.node1connectionServer
+	ntb.node1address2, ntb.node1mailbox2 = connections.NewMailbox()
+	ntb.node1address2.connectionServer = ntb.node1connectionServer
 
-	setConnections(ntb.c2)
-	ntb.addr1_2, ntb.mailbox1_2 = connections.NewMailbox()
-	ntb.addr1_2.connectionServer = ntb.c2
-	ntb.addr2_2, ntb.mailbox2_2 = connections.NewMailbox()
-	ntb.addr2_2.connectionServer = ntb.c2
+	setConnections(ntb.node2connectionServer)
+	ntb.node2address1, ntb.node2mailbox1 = connections.NewMailbox()
+	ntb.node2address1.connectionServer = ntb.node2connectionServer
+	ntb.node2address2, ntb.node2mailbox2 = connections.NewMailbox()
+	ntb.node2address2.connectionServer = ntb.node2connectionServer
 
-	ntb.rem1_2 = &Address{
-		mailboxID:        ntb.addr1_2.mailboxID,
-		connectionServer: ntb.c1,
+	ntb.fromNode2toNode1mailbox2 = &Address{
+		mailboxID:        ntb.node2address1.mailboxID,
+		connectionServer: ntb.node1connectionServer,
 	}
-	ntb.rem2_2 = &Address{
-		mailboxID:        ntb.addr2_2.mailboxID,
-		connectionServer: ntb.c1,
-	}
-
-	ntb.rem1_1 = &Address{
-		mailboxID:        ntb.addr1_1.mailboxID,
-		connectionServer: ntb.c2,
-	}
-	ntb.rem2_1 = &Address{
-		mailboxID:        ntb.addr2_1.mailboxID,
-		connectionServer: ntb.c2,
+	ntb.fromNode1toNode2mailbox2 = &Address{
+		mailboxID:        ntb.node2address2.mailboxID,
+		connectionServer: ntb.node1connectionServer,
 	}
 
-	ntb.remote1to2 = ntb.c1.remoteMailboxes[2]
-	ntb.remote2to1 = ntb.c2.remoteMailboxes[1]
+	ntb.fromNode2toNode1mailbox1 = &Address{
+		mailboxID:        ntb.node1address1.mailboxID,
+		connectionServer: ntb.node2connectionServer,
+	}
+	ntb.fromNode1toNode2mailbox1 = &Address{
+		mailboxID:        ntb.node1address2.mailboxID,
+		connectionServer: ntb.node2connectionServer,
+	}
+
+	ntb.node1remoteMailboxes = ntb.node1connectionServer.remoteMailboxes[2]
+	ntb.node2remoteMailboxes = ntb.node2connectionServer.remoteMailboxes[1]
 
 	setConnections(nil)
 
@@ -167,12 +168,12 @@ func testbed(spec *ClusterSpec) *NetworkTestBed {
 	}
 	ntb := unstartedTestbed(spec)
 
-	go ntb.c2.Serve()
-	ntb.c2.waitForListen()
-	go ntb.c1.Serve()
+	go ntb.node2connectionServer.Serve()
+	ntb.node2connectionServer.waitForListen()
+	go ntb.node1connectionServer.Serve()
 
-	ntb.c1.waitForConnection(NodeID(2))
-	ntb.c2.waitForConnection(NodeID(1))
+	ntb.node1connectionServer.waitForConnection(NodeID(2))
+	ntb.node2connectionServer.waitForConnection(NodeID(1))
 
 	return ntb
 }
