@@ -165,7 +165,10 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		ntb.fromNode2toNode1mailbox1.Send("a")
-		ntb.node1mailbox1.ReceiveNext()
+		err := ntb.fromNode2toNode1mailbox1.Send("a")
+		if err != nil {
+			b.Error(err)
+		}
+		_ = ntb.node1mailbox1.ReceiveNext()
 	}
 }
