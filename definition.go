@@ -447,7 +447,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	cluster.hash = hash.Sum64()
 
 	if len(errs) > 0 {
-		return nil, nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s\n",
+		return nil, nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s",
 			strings.Join(errs, "\n * "),
 		)
 	}
