@@ -419,10 +419,6 @@ func (r *registry) GetDebugger() NamesDebugger {
 // registered with the given string.
 //
 func (r *registry) Lookup(s string) *Address {
-	// Make sure we process all of the outstanding registry messages before
-	// performing the lookup.
-	r.Sync()
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
