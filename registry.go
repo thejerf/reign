@@ -95,10 +95,17 @@ type MultipleClaim struct {
 
 type stopRegistry struct{}
 
-// synchronizeRegistry is used for unit testing
+// synchronizeRegistry is used for registry mailbox synchronization.
 type synchronizeRegistry struct {
 	ch chan voidtype
 }
+
+type registryEntry struct {
+	Name      string
+	MailboxID MailboxID
+}
+
+type registryEntries []registryEntry
 
 // Names exposes some functionality of registry
 //
@@ -340,6 +347,8 @@ func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
 }
 
 func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
+	entries := make(registryEntries, 0, len(msg.Claims))
+
 	for name, mailboxIDs := range msg.Claims {
 		for intMailboxID := range mailboxIDs {
 			// Sanity check.
@@ -348,9 +357,15 @@ func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 				continue
 			}
 
-			r.register(name, MailboxID(intMailboxID))
-			r.Tracef("Synced mailbox %x for %q", intMailboxID, name)
+			entries = append(entries, registryEntry{
+				Name:      name,
+				MailboxID: MailboxID(intMailboxID),
+			})
 		}
+	}
+
+	if len(entries) > 0 {
+		r.registerAll(entries)
 	}
 }
 
@@ -368,18 +383,26 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 		return
 	}
 
-	for name, claimants := range r.claims {
-		for claimant := range claimants {
-			if claimant.NodeID() == msg.node {
-				r.unregister(name, claimant)
-				r.Tracef("Unregistered mailbox %x for %q", claimant, name)
+	entries := registryEntries{}
+
+	r.mu.Lock()
+	for name, mailboxIDs := range r.claims {
+		for mailboxID := range mailboxIDs {
+			if mailboxID.NodeID() == msg.node {
+				entries = append(entries, registryEntry{
+					Name:      name,
+					MailboxID: mailboxID,
+				})
 			}
 		}
 	}
 
-	r.mu.Lock()
 	delete(r.nodeRegistries, msg.node)
 	r.mu.Unlock()
+
+	if len(entries) > 0 {
+		r.unregisterAll(entries)
+	}
 }
 
 func (r *registry) toOtherNodes(msg interface{}) {
@@ -396,6 +419,10 @@ func (r *registry) GetDebugger() NamesDebugger {
 // registered with the given string.
 //
 func (r *registry) Lookup(s string) *Address {
+	// Make sure we process all of the outstanding registry messages before
+	// performing the lookup.
+	r.Sync()
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -482,31 +509,45 @@ func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 
 // register is the internal registration function.
 func (r *registry) register(name string, mID MailboxID) {
+	r.registerAll(
+		registryEntries{
+			registryEntry{
+				Name:      name,
+				MailboxID: mID,
+			},
+		},
+	)
+}
+
+// registerAll atomically registers registry entries.
+func (r *registry) registerAll(entries registryEntries) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	nameClaimants, haveNameClaimants := r.claims[name]
-	if !haveNameClaimants {
-		nameClaimants = make(map[MailboxID]voidtype)
-		r.claims[name] = nameClaimants
-	}
-
-	nameClaimants[mID] = void
-
-	// If there are multiple claims now, and one of them is local,
-	// notify our local Address of the conflict.
-	if len(nameClaimants) > 1 && mID.NodeID() == r.thisNode {
-		claimants := []Address{}
-		for claimant := range nameClaimants {
-			addr := Address{
-				mailboxID:        claimant,
-				connectionServer: r.connectionServer,
-			}
-			claimants = append(claimants, addr)
+	for _, e := range entries {
+		nameClaimants, haveNameClaimants := r.claims[e.Name]
+		if !haveNameClaimants {
+			nameClaimants = make(map[MailboxID]voidtype)
+			r.claims[e.Name] = nameClaimants
 		}
-		for _, addr := range claimants {
-			r.Tracef("Sending MultipleClaim for %q to Address %x", name, addr.mailboxID)
-			addr.Send(MultipleClaim{Name: name})
+
+		nameClaimants[e.MailboxID] = void
+
+		// If there are multiple claims now, and one of them is local,
+		// notify our local Address of the conflict.
+		if len(nameClaimants) > 1 && e.MailboxID.NodeID() == r.thisNode {
+			claimants := []Address{}
+			for claimant := range nameClaimants {
+				addr := Address{
+					mailboxID:        claimant,
+					connectionServer: r.connectionServer,
+				}
+				claimants = append(claimants, addr)
+			}
+			for _, addr := range claimants {
+				r.Tracef("Sending MultipleClaim for %q to Address %x", e.Name, addr.mailboxID)
+				addr.Send(MultipleClaim{Name: e.Name})
+			}
 		}
 	}
 }
@@ -516,29 +557,53 @@ func (r *registry) register(name string, mID MailboxID) {
 // check for anyone currently waiting for a termination notice on that
 // name and send it.
 func (r *registry) unregister(name string, mID MailboxID) {
+	r.unregisterAll(
+		registryEntries{
+			registryEntry{
+				Name:      name,
+				MailboxID: mID,
+			},
+		},
+	)
+}
+
+// unregisterAll atomically unregisters registry entries.
+func (r *registry) unregisterAll(entries registryEntries) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	currentRegistrants, ok := r.claims[name]
-	if !ok {
-		return
-	}
-	delete(currentRegistrants, mID)
+	for _, e := range entries {
+		currentRegistrants, ok := r.claims[e.Name]
+		if !ok {
+			continue
+		}
+		delete(currentRegistrants, e.MailboxID)
 
-	if len(currentRegistrants) == 0 {
-		delete(r.claims, name)
+		if len(currentRegistrants) == 0 {
+			delete(r.claims, e.Name)
+		}
 	}
 }
 
 // unregisterMailbox unregisters all names associated with the given mailbox ID
 func (r *registry) unregisterMailbox(mID MailboxID) {
-	// TODO: make this more efficient?
-	for name, claimants := range r.claims {
-		for claimant := range claimants {
-			if claimant == mID {
-				r.unregister(name, claimant)
+	entries := registryEntries{}
+
+	r.mu.Lock()
+	for name, mailboxIDs := range r.claims {
+		for mailboxID := range mailboxIDs {
+			if mailboxID == mID {
+				entries = append(entries, registryEntry{
+					Name:      name,
+					MailboxID: mailboxID,
+				})
 			}
 		}
+	}
+	r.mu.Unlock()
+
+	if len(entries) > 0 {
+		r.unregisterAll(entries)
 	}
 }
 
