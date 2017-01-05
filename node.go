@@ -109,7 +109,7 @@ func (nc *nodeConnector) String() string {
 }
 
 func (nc *nodeConnector) Serve() {
-	nc.Tracef("node connection from %d to %d, starting serve", nc.source.ID, nc.dest.ID)
+	nc.Infof("node connection from %d to %d, starting serve", nc.source.ID, nc.dest.ID)
 
 	connection, err := nc.connect()
 	nc.connection = connection
@@ -117,7 +117,7 @@ func (nc *nodeConnector) Serve() {
 		nc.Errorf("Could not connect to node %v: %s", nc.dest.ID, err.Error())
 		return
 	}
-	nc.Tracef("%d -> %d connected", nc.source.ID, nc.dest.ID)
+	nc.Infof("%d -> %d connected", nc.source.ID, nc.dest.ID)
 
 	// sync with the Stop method, which could conceivably be triggered
 	// before we even get here
@@ -133,14 +133,14 @@ func (nc *nodeConnector) Serve() {
 		nc.Errorf("Could not SSL handshake to node %v: %s", nc.dest.ID, err.Error())
 		return
 	}
-	nc.Tracef("%d -> %d ssl handshake successful", nc.source.ID, nc.dest.ID)
+	nc.Infof("%d -> %d ssl handshake successful", nc.source.ID, nc.dest.ID)
 
 	err = connection.clusterHandshake()
 	if err != nil {
 		nc.Errorf("Could not perform cluster handshake with node %v: %s", nc.dest.ID, err.Error())
 		return
 	}
-	nc.Tracef("%d -> %d cluster handshake successful", nc.source.ID, nc.dest.ID)
+	nc.Infof("%d -> %d cluster handshake successful", nc.source.ID, nc.dest.ID)
 
 	// hook up the connection to the permanent message manager
 	nc.remoteMailboxes.setConnection(connection)
@@ -152,7 +152,7 @@ func (nc *nodeConnector) Serve() {
 		nc.Errorf("Could not sync registry with node %v: %s", nc.dest.ID, err.Error())
 		return
 	}
-	nc.Tracef("%d -> %d registry sync successful", nc.source.ID, nc.dest.ID)
+	nc.Infof("%d -> %d registry sync successful", nc.source.ID, nc.dest.ID)
 
 	// and handle all incoming messages
 	connection.handleIncomingMessages()

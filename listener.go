@@ -234,21 +234,20 @@ func (ic *incomingConnection) handleConnection() {
 		}
 	}()
 
-	ic.Tracef("Node %d listener got connection", ic.server.ID)
 	err := ic.sslHandshake()
 	if err != nil {
 		// FIXME: This ought to wrap the error somehow, not smash to string,
 		// which would frankly be hypocritical
 		panic("Could not SSL handshake the incoming connection: " + err.Error())
 	}
-	ic.Tracef("Node %d listener successfully SSL'ed", ic.server.ID)
+	ic.Infof("Node %d listener successfully SSL'ed", ic.server.ID)
 
 	err = ic.clusterHandshake()
 	if err != nil {
 		ic.Errorf("Could not cluster handshake the incoming connection: " + err.Error())
 		return
 	}
-	ic.Tracef("Node %d listener successfully cluster handshook", ic.server.ID)
+	ic.Infof("Node %d listener successfully cluster handshook", ic.server.ID)
 
 	ic.remoteMailboxes = ic.mailboxesForNode(ic.client.ID)
 	ic.remoteMailboxes.setConnection(ic)
@@ -260,7 +259,7 @@ func (ic *incomingConnection) handleConnection() {
 		ic.Errorf("Could not sync registry with node %d: %s", ic.client.ID, err.Error())
 		return
 	}
-	ic.Tracef("Node %d listener successfully synced registry", ic.server.ID)
+	ic.Infof("Node %d listener successfully synced registry", ic.server.ID)
 
 	ic.handleIncomingMessages()
 }
