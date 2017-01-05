@@ -521,27 +521,23 @@ func (r *registry) registerAll(entries registryEntries) {
 	defer r.mu.Unlock()
 
 	for _, e := range entries {
-		nameClaimants, haveNameClaimants := r.claims[e.name]
+		mailboxIDs, haveNameClaimants := r.claims[e.name]
 		if !haveNameClaimants {
-			nameClaimants = make(map[MailboxID]voidtype)
-			r.claims[e.name] = nameClaimants
+			mailboxIDs = make(map[MailboxID]voidtype)
+			r.claims[e.name] = mailboxIDs
 		}
 
-		nameClaimants[e.mailboxID] = void
+		mailboxIDs[e.mailboxID] = void
 
-		// If there are multiple claims now, and one of them is local,
-		// notify our local Address of the conflict.
-		if len(nameClaimants) > 1 && e.mailboxID.NodeID() == r.thisNode {
-			claimants := []Address{}
-			for claimant := range nameClaimants {
+		// If there are multiple mailboxes (claimants) now and one of them is
+		// local, notify all Addresses of the conflict.
+		if len(mailboxIDs) > 1 && e.mailboxID.NodeID() == r.thisNode {
+			for mailboxID := range mailboxIDs {
+				r.Tracef("Sending MultipleClaim for %q to Address %x", e.name, mailboxID)
 				addr := Address{
-					mailboxID:        claimant,
+					mailboxID:        mailboxID,
 					connectionServer: r.connectionServer,
 				}
-				claimants = append(claimants, addr)
-			}
-			for _, addr := range claimants {
-				r.Tracef("Sending MultipleClaim for %q to Address %x", e.name, addr.mailboxID)
 				addr.Send(MultipleClaim{Name: e.name})
 			}
 		}
