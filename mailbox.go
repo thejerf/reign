@@ -557,6 +557,20 @@ func (m *Mailbox) removeNotifyAddress(target *Address) {
 	}
 }
 
+// MessageCount returns the number of messages in the mailbox.
+//
+// 0 is always returned if the mailbox is terminated.
+func (m *Mailbox) MessageCount() (n int) {
+	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
+	if !m.terminated {
+		n = len(m.messages)
+	}
+
+	return
+}
+
 // ReceiveNext will receive the next message sent to this mailbox.
 // It blocks until the next message comes in, which may be forever.
 // If the mailbox is terminated, it will receive a MailboxTerminated reply.
@@ -567,12 +581,13 @@ func (m *Mailbox) ReceiveNext() interface{} {
 	// FIXME: Verify three listeners on one shared mailbox all get
 	// terminated properly.
 	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
 	for len(m.messages) == 0 && !m.terminated {
 		m.cond.Wait()
 	}
 
 	if m.terminated {
-		m.cond.L.Unlock()
 		return MailboxTerminated(m.id)
 	}
 
@@ -584,7 +599,7 @@ func (m *Mailbox) ReceiveNext() interface{} {
 	} else {
 		m.messages = m.messages[1:]
 	}
-	m.cond.L.Unlock()
+
 	return msg.msg
 }
 
@@ -616,16 +631,18 @@ func (m *Mailbox) ReceiveNextAsync() (interface{}, bool) {
 
 // ReceiveNextTimeout works like ReceiveNextAsync, but it will wait until either a message
 // is received or the timeout expires, whichever is sooner
-func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (interface{}, bool) {
+func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (msg interface{}, ok bool) {
 	startTime := time.Now()
 	endTime := startTime.Add(timeout)
+
 	for !time.Now().After(endTime) {
-		msg, ok := m.ReceiveNextAsync()
+		msg, ok = m.ReceiveNextAsync()
 		if ok {
-			return msg, true
+			return
 		}
 	}
-	return nil, false
+
+	return
 }
 
 // Receive will receive the next message sent to this mailbox that matches

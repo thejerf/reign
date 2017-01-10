@@ -305,6 +305,8 @@ func (r *registry) Serve() {
 		default:
 			r.connectionServer.ClusterLogger.Errorf("Unknown registry message of type %T: %#v\n", msg, message)
 		}
+
+		r.Tracef("%d messages remaining in node %x registry mailbox", r.MessageCount(), r.thisNode)
 	}
 }
 
