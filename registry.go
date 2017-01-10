@@ -20,43 +20,23 @@ the cluster. We then *completely punt on consistency*. That is, two
 things are *welcome* by the system to claim the same name.
 
 What happens if they do that? Well, the system simply takes the message
-you are sending, and sends it to *both* registrants... or, more accurately,
-*all* the registrants.
+you are sending, and simply randomly chooses one, per message.
 
 What? Chaos! Madness! Insanity! ... actually, in a lot of these distributed
 systems, not so much. Erlang-style message passing already only promises
 a best-effort delivery standing between 0 and 1 copies of the message
-delivered; it isn't that much more crazy to then say that if you invoke
-certain functionality you may also get N deliveries. One example of
-how this doesn't matter is if you have a service being provided by
-an external resource that connects into the cluster and registers itself
-by some name, reconnecting when it is disconnected; if the remote service
-itself never has more than one simultaneous connection open, then the
-remote service is implementing the constraint that there can not possibly
-be more than one correct address.
+delivered. That's what this is.
 
-In return, what you get is Total Partitionability. Unlike many other
-systems that fail if a certain number of nodes drop out of the cluster,
-a Reign cluster will carry on to the best of its ability using whatever
-local resources are available. When the cluster returns, so will the
-whatever other remote resources are supposed to be available. It is
-sometimes claimed that "partitions are uncommon"... well, that entirely
-depends on scale. This makes reign scale to global scale; a Reign
-cluster is designed to be globally distributed if you like. If two
-datacenters lose their connectivity, they can continue to service what
-they can, and transparently knit back together when the connection comes
-back. Of course, whether the system you are implementing can handle
-that is up to you....
+This results in the system being very partition tolerant. A reign
+cluster can be cut in half, and broadly speaking it will continue to
+operate to the best of its abilities. Probably the app sitting on top
+won't feel so good about it, but at least this layer will carry on.
 
 As a final note, when the notification of a claim of an Address that
 something local also believes is claimed comes in, a notification to
 the local claimant will be sent telling them that there is a conflicting
-claim, including all claimants the local node believes to exist. In my
-case, since I do indeed have services registering themselves with a
-service socket, I just kill whatever socket I think I have in response to
-such a claim. If the local service is the "real" service, it'll issue
-another claim again on that name; if it is fake, then my local registration
-just goes away.
+claim, including all claimants the local node believes to exist. FIXME:
+Is this clearly documented in the actual godoc?
 
 */
 
