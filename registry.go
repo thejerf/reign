@@ -171,6 +171,11 @@ type registry struct {
 	// name -> set of mailbox IDs.
 	claims map[string]map[MailboxID]voidtype
 
+	// The set of all mailboxIDs understood by the local node, organized
+	// as mailbox ID -> registryEntries, suitable for unregistering the
+	// mailbox ID from each registered name.
+	mailboxIDs map[MailboxID]registryEntries
+
 	// The map of nodes -> addresses used to communicate with those nodes.
 	// When a registration is made, this is the list of nodes that will
 	// receive notifications of the new address. This only has remote nodes.
@@ -207,6 +212,7 @@ func newRegistry(cs *connectionServer, node NodeID, log ClusterLogger) *registry
 
 	r := &registry{
 		claims:         make(map[string]map[MailboxID]voidtype),
+		mailboxIDs:     make(map[MailboxID]registryEntries),
 		nodeRegistries: make(map[NodeID]Address),
 		thisNode:       node,
 		ClusterLogger:  log,
@@ -522,6 +528,7 @@ func (r *registry) registerAll(entries registryEntries) {
 	defer r.mu.Unlock()
 
 	for _, e := range entries {
+		r.mailboxIDs[e.mailboxID] = append(r.mailboxIDs[e.mailboxID], e)
 		mailboxIDs, haveNameClaimants := r.claims[e.name]
 		if !haveNameClaimants {
 			mailboxIDs = make(map[MailboxID]voidtype)
@@ -580,18 +587,10 @@ func (r *registry) unregisterAll(entries registryEntries) {
 
 // unregisterMailbox unregisters all names associated with the given mailbox ID
 func (r *registry) unregisterMailbox(mID MailboxID) {
-	entries := registryEntries{}
-
 	r.mu.Lock()
-	for name, mailboxIDs := range r.claims {
-		for mailboxID := range mailboxIDs {
-			if mailboxID == mID {
-				entries = append(entries, registryEntry{
-					name:      name,
-					mailboxID: mailboxID,
-				})
-			}
-		}
+	entries, ok := r.mailboxIDs[mID]
+	if ok {
+		delete(r.mailboxIDs, mID)
 	}
 	r.mu.Unlock()
 

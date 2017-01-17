@@ -162,6 +162,7 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 	ntb := testbed(nil)
 	defer ntb.terminate()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -170,5 +171,22 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 			b.Error(err)
 		}
 		_ = ntb.node1mailbox1.ReceiveNext()
+	}
+}
+
+func BenchmarkRegisterUnregisterMailbox(b *testing.B) {
+	ntb := testbed(nil)
+	defer ntb.terminate()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		a, m := ntb.node1connectionServer.NewMailbox()
+		ntb.node1connectionServer.registry.Register("test", a)
+		ntb.node1connectionServer.registry.Sync()
+
+		m.Terminate()
+		ntb.node1connectionServer.registry.Sync()
 	}
 }
