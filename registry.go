@@ -66,7 +66,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 
 	"github.com/thejerf/reign/internal"
 )
@@ -152,7 +151,7 @@ type Names interface {
 	GetDebugger() NamesDebugger
 	Lookup(string) *Address
 	MessageCount() int
-	MultipleClaimCount() int32
+	MultipleClaimCount() int
 	Register(string, *Address) error
 	SeenNames(...string) []bool
 	Serve()
@@ -168,12 +167,12 @@ var _ NamesDebugger = (*registry)(nil)
 // taking out the lock (registry.m).  Most of the functionality required can
 // be accessed through the publically-exposed (uppercase) methods.
 type registry struct {
-	// multipleClaimCount gauges the number of multiple claims.
-	multipleClaimCount int32
-
 	ClusterLogger
 
 	mu sync.Mutex
+
+	// multipleClaimCount gauges the number of multiple claims.
+	multipleClaimCount int
 
 	// the set of all claims understood by the local node, organized as
 	// name -> set of mailbox IDs.
@@ -208,7 +207,7 @@ type NamesDebugger interface {
 	DumpClaims() map[string][]MailboxID
 	DumpJSON() string
 	MessageCount() int
-	MultipleClaimCount() int32
+	MultipleClaimCount() int
 	SeenNames(...string) []bool
 }
 
@@ -462,8 +461,11 @@ func (r *registry) Lookup(s string) *Address {
 	}
 }
 
-func (r *registry) MultipleClaimCount() int32 {
-	return atomic.LoadInt32(&r.multipleClaimCount)
+func (r *registry) MultipleClaimCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.multipleClaimCount
 }
 
 // Register claims the given global name in the registry.
@@ -567,8 +569,8 @@ func (r *registry) registerAll(entries registryEntries) {
 		}
 
 		if preCount <= 1 && postCount > 1 {
-			// Multiple claims for the current name.
-			atomic.AddInt32(&r.multipleClaimCount, 1)
+			// Multiple claim for the current name.
+			r.multipleClaimCount++
 		}
 	}
 }
@@ -603,9 +605,9 @@ func (r *registry) unregisterAll(entries registryEntries) {
 		delete(mailboxIDs, e.mailboxID)
 		postCount := len(mailboxIDs)
 
-		if preCount > 1 && postCount <= 1 && atomic.LoadInt32(&r.multipleClaimCount) > 0 {
+		if preCount > 1 && postCount <= 1 && r.multipleClaimCount > 0 {
 			// No longer have a multiple claim for the current name.
-			atomic.AddInt32(&r.multipleClaimCount, -1)
+			r.multipleClaimCount--
 		}
 
 		if len(mailboxIDs) == 0 {
