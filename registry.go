@@ -66,6 +66,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 
 	"github.com/thejerf/reign/internal"
 )
@@ -151,6 +152,7 @@ type Names interface {
 	GetDebugger() NamesDebugger
 	Lookup(string) *Address
 	MessageCount() int
+	MultipleClaimCount() int32
 	Register(string, *Address) error
 	SeenNames(...string) []bool
 	Serve()
@@ -159,10 +161,16 @@ type Names interface {
 	Unregister(string, *Address)
 }
 
+var _ Names = (*registry)(nil)
+var _ NamesDebugger = (*registry)(nil)
+
 // IMPORTANT: Do not call the private (lowercase) methods of registry without
 // taking out the lock (registry.m).  Most of the functionality required can
 // be accessed through the publically-exposed (uppercase) methods.
 type registry struct {
+	// multipleClaimCount gauges the number of multiple claims.
+	multipleClaimCount int32
+
 	ClusterLogger
 
 	mu sync.Mutex
@@ -199,6 +207,8 @@ type NamesDebugger interface {
 	AllNames() []string
 	DumpClaims() map[string][]MailboxID
 	DumpJSON() string
+	MessageCount() int
+	MultipleClaimCount() int32
 	SeenNames(...string) []bool
 }
 
@@ -452,6 +462,10 @@ func (r *registry) Lookup(s string) *Address {
 	}
 }
 
+func (r *registry) MultipleClaimCount() int32 {
+	return atomic.LoadInt32(&r.multipleClaimCount)
+}
+
 // Register claims the given global name in the registry.
 //
 // This does not happen synchronously, as there seems to be no reason
@@ -535,11 +549,13 @@ func (r *registry) registerAll(entries registryEntries) {
 			r.claims[e.name] = mailboxIDs
 		}
 
+		preCount := len(mailboxIDs)
 		mailboxIDs[e.mailboxID] = void
+		postCount := len(mailboxIDs)
 
 		// If there are multiple mailboxes (claimants) now and one of them is
 		// local, notify all Addresses of the conflict.
-		if len(mailboxIDs) > 1 && e.mailboxID.NodeID() == r.thisNode {
+		if postCount > 1 && e.mailboxID.NodeID() == r.thisNode {
 			for mailboxID := range mailboxIDs {
 				r.Tracef("Sending MultipleClaim for %q to Address %x", e.name, mailboxID)
 				addr := Address{
@@ -548,6 +564,11 @@ func (r *registry) registerAll(entries registryEntries) {
 				}
 				addr.Send(MultipleClaim{Name: e.name})
 			}
+		}
+
+		if preCount <= 1 && postCount > 1 {
+			// Multiple claims for the current name.
+			atomic.AddInt32(&r.multipleClaimCount, 1)
 		}
 	}
 }
@@ -573,13 +594,21 @@ func (r *registry) unregisterAll(entries registryEntries) {
 	defer r.mu.Unlock()
 
 	for _, e := range entries {
-		currentRegistrants, ok := r.claims[e.name]
+		mailboxIDs, ok := r.claims[e.name]
 		if !ok {
 			continue
 		}
-		delete(currentRegistrants, e.mailboxID)
 
-		if len(currentRegistrants) == 0 {
+		preCount := len(mailboxIDs)
+		delete(mailboxIDs, e.mailboxID)
+		postCount := len(mailboxIDs)
+
+		if preCount > 1 && postCount <= 1 && atomic.LoadInt32(&r.multipleClaimCount) > 0 {
+			// No longer have a multiple claim for the current name.
+			atomic.AddInt32(&r.multipleClaimCount, -1)
+		}
+
+		if len(mailboxIDs) == 0 {
 			delete(r.claims, e.name)
 		}
 	}

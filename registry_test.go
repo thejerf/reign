@@ -276,3 +276,76 @@ func TestInternalAllNodeClaims(t *testing.T) {
 		}
 	}
 }
+
+func TestMultipleClaimCount(t *testing.T) {
+	cs, r := noClustering(NullLogger)
+	defer cs.Terminate()
+
+	go func() { r.Serve() }()
+	defer r.Stop()
+
+	addr1, mbx1 := cs.NewMailbox()
+	defer mbx1.Terminate()
+
+	addr2, mbx2 := cs.NewMailbox()
+	defer mbx2.Terminate()
+
+	addr3, mbx3 := cs.NewMailbox()
+	defer mbx3.Terminate()
+
+	addr4, mbx4 := cs.NewMailbox()
+	defer mbx4.Terminate()
+
+	addr5, mbx5 := cs.NewMailbox()
+	defer mbx5.Terminate()
+
+	if actual := r.MultipleClaimCount(); actual != 0 {
+		t.Fatalf("expected 0 multiple claims; actual = %d", actual)
+	}
+
+	name1 := "foo"
+	r.Register(name1, addr1)
+	r.Register(name1, addr2)
+	r.Sync()
+
+	// There is a multiple claim for name1.
+	if actual := r.MultipleClaimCount(); actual != 1 {
+		t.Fatalf("expected 1 multiple claim; actual = %d", actual)
+	}
+
+	name2 := "bar"
+	r.Register(name2, addr3)
+	r.Register(name2, addr4)
+	r.Register(name2, addr5)
+	r.Sync()
+
+	// There are now two multiple claims, one for name1 and one for name2.
+	if actual := r.MultipleClaimCount(); actual != 2 {
+		t.Fatalf("expected 2 multiple claims; actual = %d", actual)
+	}
+
+	r.Unregister(name1, addr2)
+	r.Sync()
+
+	// We resolved one of the multiple claims.
+	if actual := r.MultipleClaimCount(); actual != 1 {
+		t.Fatalf("expected 1 multiple claim; actual = %d", actual)
+	}
+
+	r.Unregister(name2, addr3)
+	r.Sync()
+
+	// We should *still* have 1 multiple claim because there were 3 mailboxes
+	// registered under name2.
+	if actual := r.MultipleClaimCount(); actual != 1 {
+		t.Fatalf("expected 1 multiple claim; actual = %d", actual)
+	}
+
+	r.Unregister(name2, addr5)
+	r.Sync()
+
+	// Both name1 and name2 should only have a single claim now.
+	if actual := r.MultipleClaimCount(); actual != 0 {
+		t.Fatalf("expected 0 multiple claims; actual = %d", actual)
+	}
+}
