@@ -72,8 +72,6 @@ type ConnectionService interface {
 	AddConnectionStatusCallback(f func(NodeID, bool))
 }
 
-var _ ConnectionService = (*connectionServer)(nil)
-
 // A connection serve manages the connections, both incoming and outgoing.
 // So it maintains a listener (if necessary), and maintains the outgoing
 // connections. This could, arguably, be named "node".
