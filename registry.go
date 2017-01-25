@@ -610,7 +610,7 @@ func (r *registry) unregisterAll(entries registryEntries) {
 			r.multipleClaimCount--
 		}
 
-		if len(mailboxIDs) == 0 {
+		if postCount == 0 {
 			delete(r.claims, e.name)
 		}
 	}
