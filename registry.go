@@ -160,6 +160,8 @@ type Names interface {
 	Unregister(string, *Address)
 }
 
+var _ Names = (*registry)(nil)
+
 // IMPORTANT: Do not call the private (lowercase) methods of registry without
 // taking out the lock (registry.m).  Most of the functionality required can
 // be accessed through the publically-exposed (uppercase) methods.
