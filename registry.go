@@ -559,11 +559,24 @@ func (r *registry) registerAll(entries registryEntries) {
 		if postCount > 1 && e.mailboxID.NodeID() == r.thisNode {
 			for mailboxID := range mailboxIDs {
 				r.Tracef("Sending MultipleClaim for %q to Address %x", e.name, mailboxID)
-				addr := Address{
+				addr := &Address{
 					mailboxID:        mailboxID,
 					connectionServer: r.connectionServer,
 				}
-				addr.Send(MultipleClaim{Name: e.name})
+
+				err := addr.Send(MultipleClaim{Name: e.name})
+
+				// Attempt to send the message to the mailbox.  If the mailbox is terminated,
+				// unregister it.  This scenario can happen when a mailbox is registered and
+				// terminated but never properly unregistered.  The MultipleClaim message will
+				// never reach its destination and the caller of Register() will never know
+				// about the multiple claim.
+				if err == ErrMailboxTerminated {
+					r.Unregister(e.name, addr)
+					continue
+				}
+
+				r.Errorf("Error sending multiple claim to %q: %s", e.name, err)
 			}
 		}
 
