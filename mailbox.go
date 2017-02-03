@@ -441,13 +441,15 @@ func (m *mailboxes) mailboxByID(mID MailboxID) (mbox *Mailbox, err error) {
 		err = ErrNotLocalMailbox
 		return
 	}
+
 	m.RLock()
 	mbox, exists := m.mailboxes[mID]
 	m.RUnlock()
-	if exists {
-		return
+
+	if !exists {
+		err = ErrMailboxTerminated
 	}
-	err = ErrMailboxTerminated
+
 	return
 }
 
