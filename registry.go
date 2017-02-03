@@ -168,7 +168,7 @@ var _ Names = (*registry)(nil)
 type registry struct {
 	ClusterLogger
 
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	// multipleClaimCount gauges the number of multiple claims.
 	multipleClaimCount int
@@ -263,8 +263,8 @@ func (r *registry) String() string {
 	// Since the registry's Serve() method acquires a lock receiving messages,
 	// we need to make sure that we also acquire that lock before replying to
 	// Suture's service name inquiry.
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	return fmt.Sprintf("Registry on node %d", r.thisNode)
 }
@@ -332,8 +332,8 @@ func (r *registry) Sync() {
 // generateAllNodeClaims returns a populated AllNodeClaims object suitable
 // for synchronizing mailbox claims with a remote node.
 func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	anc := internal.AllNodeClaims{
 		Node:   internal.IntNodeID(r.connectionServer.nodeID),
@@ -434,10 +434,11 @@ func (r *registry) GetDebugger() NamesDebugger {
 // registered with the given string.
 //
 func (r *registry) Lookup(s string) *Address {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+	r.mu.RLock()
 	claims := r.claims[s]
+	cs := r.connectionServer
+	r.mu.RUnlock()
+
 	claimIDs := make([]MailboxID, 0, len(claims))
 	for k := range claims {
 		claimIDs = append(claimIDs, k)
@@ -455,14 +456,14 @@ func (r *registry) Lookup(s string) *Address {
 
 	return &Address{
 		mailboxID:        id,
-		connectionServer: r.connectionServer,
+		connectionServer: cs,
 		mailbox:          nil,
 	}
 }
 
 func (r *registry) MultipleClaimCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	return r.multipleClaimCount
 }
@@ -645,8 +646,8 @@ func (r *registry) unregisterMailbox(mID MailboxID) {
 // RegistryDebugger methods
 
 func (r *registry) DumpClaims() map[string][]MailboxID {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	copy := make(map[string][]MailboxID, len(r.claims))
 	for name := range r.claims {
@@ -667,8 +668,8 @@ func (r *registry) DumpJSON() string {
 }
 
 func (r *registry) AddressCount() (count uint) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	for _, addresses := range r.claims {
 		count += uint(len(addresses))
@@ -678,8 +679,8 @@ func (r *registry) AddressCount() (count uint) {
 }
 
 func (r *registry) AllNames() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	names := make([]string, 0, len(r.claims))
 	for name := range r.claims {
@@ -691,8 +692,8 @@ func (r *registry) AllNames() []string {
 // SeenNames returns an array where each element corresponds to whether the inputted name
 // at that index was found in the registry or not
 func (r *registry) SeenNames(names ...string) []bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	seen := make([]bool, 0, len(names))
 	for _, name := range names {
