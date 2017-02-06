@@ -545,8 +545,8 @@ func (r *registry) registerAll(entries registryEntries) {
 
 	for _, e := range entries {
 		r.mailboxIDs[e.mailboxID] = append(r.mailboxIDs[e.mailboxID], e)
-		mailboxIDs, haveNameClaimants := r.claims[e.name]
-		if !haveNameClaimants {
+		mailboxIDs, haveMailboxIDs := r.claims[e.name]
+		if !haveMailboxIDs {
 			mailboxIDs = make(map[MailboxID]voidtype)
 			r.claims[e.name] = mailboxIDs
 		}
@@ -573,11 +573,15 @@ func (r *registry) registerAll(entries registryEntries) {
 				// never reach its destination and the caller of Register() will never know
 				// about the multiple claim.
 				if err == ErrMailboxTerminated {
+					r.Tracef("Unregistering mailbox %q due to Mailbox Terminated error", mailboxID)
 					r.Unregister(e.name, addr)
 					continue
 				}
 
-				r.Errorf("Error sending multiple claim to %q: %s", e.name, err)
+				if err != nil {
+					// Report on this.  This scenario could lead to persistent multiple claims.
+					r.Errorf("Error sending MultipleClaim to %q: %s", e.name, err)
+				}
 			}
 		}
 
