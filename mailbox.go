@@ -487,15 +487,13 @@ type Mailbox struct {
 
 func (m *Mailbox) send(msg interface{}) error {
 	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
 	if m.terminated {
-		// note: can't just defer here, Broadcast must follow Unlock in the
-		// other branch
-		m.cond.L.Unlock()
 		return ErrMailboxTerminated
 	}
 
 	m.messages = append(m.messages, message{msg})
-	m.cond.L.Unlock()
 
 	m.cond.Broadcast()
 
@@ -729,10 +727,10 @@ func (m *Mailbox) Terminate() {
 	m.parent.connectionServer.registry.UnregisterMailbox(m.id.NodeID(), m.id)
 
 	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
 
 	// this is not redundant; m.terminated is part of what we have to lock
 	if m.terminated {
-		m.cond.L.Unlock()
 		return
 	}
 
@@ -752,7 +750,6 @@ func (m *Mailbox) Terminate() {
 	m.notificationAddresses = nil
 	m.messages = nil
 
-	m.cond.L.Unlock()
 	m.cond.Broadcast()
 }
 
