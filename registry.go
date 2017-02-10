@@ -622,7 +622,7 @@ func (r *registry) unregisterAll(entries registryEntries) {
 		delete(mailboxIDs, e.mailboxID)
 		postCount := len(mailboxIDs)
 
-		if preCount > 1 && postCount <= 1 && r.multipleClaimCount > 0 {
+		if preCount > 1 && postCount <= 1 {
 			// No longer have a multiple claim for the current name.
 			r.multipleClaimCount--
 		}
