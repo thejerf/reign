@@ -136,7 +136,7 @@ func TestCoverage(t *testing.T) {
 
 	// set a null cluster so that we've already declared one, then test
 	// that we can't declare another.
-	NoClustering()
+	NoClustering(NullLogger)
 	if !panics(func() { createFromSpec(testSpec(), 10, NullLogger) }) {
 		t.Fatal("createFromSpec does not object to double-creating connections")
 	}
