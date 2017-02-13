@@ -154,8 +154,6 @@ type Names interface {
 	MultipleClaimCount() int
 	Register(string, *Address) error
 	SeenNames(...string) []bool
-	Serve()
-	Stop()
 	Sync()
 	Unregister(string, *Address)
 }
