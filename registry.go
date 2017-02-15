@@ -433,9 +433,10 @@ func (r *registry) GetDebugger() NamesDebugger {
 //
 func (r *registry) Lookup(s string) *Address {
 	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	claims := r.claims[s]
 	cs := r.connectionServer
-	r.mu.RUnlock()
 
 	claimIDs := make([]MailboxID, 0, len(claims))
 	for k := range claims {
