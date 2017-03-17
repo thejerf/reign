@@ -327,6 +327,10 @@ func (a *Address) UnmarshalText(b []byte) error {
 
 // UnmarshalJSON implements JSON unmarshalling for Addresses.
 func (a *Address) UnmarshalJSON(b []byte) error {
+	// Replace quotes with the delimeters.
+	b[0] = byte('<')
+	b[len(b)-1] = byte('>')
+
 	return a.UnmarshalText(b)
 }
 
@@ -357,7 +361,16 @@ func (a *Address) MarshalText() ([]byte, error) {
 
 // MarshalJSON implements JSON marshalling for Addresses.
 func (a *Address) MarshalJSON() ([]byte, error) {
-	return a.MarshalText()
+	b, err := a.MarshalText()
+	if err != nil {
+		return nil, err
+	}
+
+	// Replace delimeters with quotes.
+	b[0] = byte('"')
+	b[len(b)-1] = byte('"')
+
+	return b, nil
 }
 
 func (a *Address) String() string {
