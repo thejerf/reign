@@ -325,6 +325,11 @@ func (a *Address) UnmarshalText(b []byte) error {
 	return ErrIllegalAddressFormat
 }
 
+// UnmarshalJSON implements JSON unmarshalling for Addresses.
+func (a *Address) UnmarshalJSON(b []byte) error {
+	return a.UnmarshalText(b)
+}
+
 // MarshalText implements text marshalling for Addresses.
 //
 // See MarshalBinary.
@@ -348,6 +353,11 @@ func (a *Address) MarshalText() ([]byte, error) {
 	default:
 		return nil, errors.New("unknown address type, internal reign error")
 	}
+}
+
+// MarshalJSON implements JSON marshalling for Addresses.
+func (a *Address) MarshalJSON() ([]byte, error) {
+	return a.MarshalText()
 }
 
 func (a *Address) String() string {
