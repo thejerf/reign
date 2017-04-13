@@ -282,6 +282,10 @@ func (a *Address) UnmarshalText(b []byte) error {
 		return errIllegalNilSlice
 	}
 
+	if len(b) == 0 {
+		return ErrIllegalAddressFormat
+	}
+
 	// must be a mailboxID of one sort or another
 	switch b[0] {
 	case byte('<'):
