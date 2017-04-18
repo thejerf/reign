@@ -518,7 +518,7 @@ func getMarshalsAndTest(a address, t *testing.T) ([]byte, []byte, []byte, string
 	var addrJSON Address
 	err = addrJSON.UnmarshalJSON(json)
 	if err != nil {
-		t.Fatal("could not unmarshal the JSON")
+		t.Fatalf("could not unmarshal the JSON %q: %s", json, err)
 	}
 	jsonID := addrJSON.mailboxID
 	if jsonID != addr.mailboxID {

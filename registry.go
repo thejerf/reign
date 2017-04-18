@@ -428,36 +428,46 @@ func (r *registry) GetDebugger() NamesDebugger {
 	return r
 }
 
-// Lookup returns an Address that can be used to send to the mailboxes
+// Lookup returns an Address that can be used to send messages to a mailbox
 // registered with the given string.
-//
-func (r *registry) Lookup(s string) *Address {
+func (r *registry) Lookup(s string) (a *Address) {
+	defer r.Tracef("Lookup for %q returned Address %q", s, a)
+
+	addresses := r.LookupAll(s)
+
+	if len(addresses) == 0 {
+		return
+	}
+
+	// Pick a random Address from our list of Addresses registered to this
+	// name and return it.
+	a = addresses[rand.Intn(len(addresses))]
+
+	return
+}
+
+// LookupAll returns a slice of Addresses that can be used to send messages
+// to the mailboxes registered with the given string.
+func (r *registry) LookupAll(s string) (a []*Address) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	claims := r.claims[s]
+	claims, ok := r.claims[s]
+	if !ok {
+		return
+	}
+
 	cs := r.connectionServer
 
-	claimIDs := make([]MailboxID, 0, len(claims))
 	for k := range claims {
-		claimIDs = append(claimIDs, k)
+		a = append(a, &Address{
+			mailboxID:        k,
+			connectionServer: cs,
+			mailbox:          nil,
+		})
 	}
 
-	// If there is nothing in the registry with the given name, return nil
-	if len(claimIDs) == 0 {
-		return nil
-	}
-
-	// Pick a random ID from our list of IDs registered to this name and return it
-	id := claimIDs[rand.Intn(len(claims))]
-
-	r.Tracef("Lookup for %q returned MailboxID %x", s, id)
-
-	return &Address{
-		mailboxID:        id,
-		connectionServer: cs,
-		mailbox:          nil,
-	}
+	return
 }
 
 func (r *registry) MultipleClaimCount() int {
@@ -586,6 +596,7 @@ func (r *registry) registerAll(entries registryEntries) {
 
 		if preCount <= 1 && postCount > 1 {
 			// Multiple claim for the current name.
+
 			r.multipleClaimCount++
 		}
 	}
