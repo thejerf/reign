@@ -150,6 +150,7 @@ type registryEntries []registryEntry
 type Names interface {
 	GetDebugger() NamesDebugger
 	Lookup(string) *Address
+	LookupAll(string) []*Address
 	MessageCount() int
 	MultipleClaimCount() int
 	Register(string, *Address) error
