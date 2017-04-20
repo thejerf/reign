@@ -436,13 +436,15 @@ func (r *registry) Lookup(s string) (a *Address) {
 
 	addresses := r.LookupAll(s)
 
-	if len(addresses) == 0 {
-		return
+	switch l := len(addresses); l {
+	case 0:
+	case 1:
+		a = addresses[0]
+	default:
+		// Pick a random Address from our list of Addresses registered to this
+		// name and return it.
+		a = addresses[rand.Intn(l)]
 	}
-
-	// Pick a random Address from our list of Addresses registered to this
-	// name and return it.
-	a = addresses[rand.Intn(len(addresses))]
 
 	return
 }
@@ -597,7 +599,6 @@ func (r *registry) registerAll(entries registryEntries) {
 
 		if preCount <= 1 && postCount > 1 {
 			// Multiple claim for the current name.
-
 			r.multipleClaimCount++
 		}
 	}

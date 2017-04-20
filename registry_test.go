@@ -20,21 +20,68 @@ func TestLookup(t *testing.T) {
 	go func() { r.Serve() }()
 	defer r.Stop()
 
-	addr, mbx := cs.NewMailbox()
-	defer mbx.Terminate()
-
 	name := "684910"
-	if err := r.Register(name, addr); err != nil {
+
+	// Lookup an identier with no registered Addresses.
+	a := r.Lookup(name)
+	if a != nil {
+		t.Fatalf("expected nil; actual: %#v", a)
+	}
+
+	addr1, mbx1 := cs.NewMailbox()
+	defer mbx1.Terminate()
+
+	if err := r.Register(name, addr1); err != nil {
 		t.Fatal(err)
 	}
 
 	r.Sync()
 
-	a := r.Lookup(name)
+	// Lookup an identifier with a single Address.
+	a = r.Lookup(name)
 	a.Send(void)
-	if _, ok := mbx.ReceiveNextAsync(); !ok {
+	if _, ok := mbx1.ReceiveNextAsync(); !ok {
 		t.Fatal("No message received")
 	}
+
+	addr2, mbx2 := cs.NewMailbox()
+	defer mbx2.Terminate()
+
+	addr3, mbx3 := cs.NewMailbox()
+	defer mbx3.Terminate()
+
+	if err := r.Register(name, addr2); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.Register(name, addr3); err != nil {
+		t.Fatal(err)
+	}
+
+	r.Sync()
+
+	// LookupAll should return a slice with 3 Addresses.
+	all := r.LookupAll(name)
+	if actual := len(all); actual != 3 {
+		t.Fatalf("expected 3 Addresses; actual %d", actual)
+	}
+
+	// Make sure the given Address is one of the 3 we registered with the given name.
+	check := func(t *testing.T, addr *Address) {
+		switch addr.GetID() {
+		case addr1.GetID(), addr2.GetID(), addr3.GetID():
+		default:
+			t.Fatal("got unexpected Address")
+		}
+	}
+
+	for _, addr := range all {
+		check(t, addr)
+	}
+
+	// Lookup an identifier with multiple Addresses.  A random Address should be returned.
+	a = r.Lookup(name)
+	check(t, a)
 }
 
 func TestConnectionStatus(t *testing.T) {
