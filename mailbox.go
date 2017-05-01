@@ -346,6 +346,9 @@ func (a *Address) UnmarshalJSON(b []byte) error {
 //
 // See MarshalBinary.
 func (a *Address) MarshalText() ([]byte, error) {
+	// Cache the mailbox before we attempt to marshal the Address.
+	_ = a.getAddress()
+
 	switch mbox := a.mailbox.(type) {
 	case *Mailbox:
 		ClusterID := mbox.id.NodeID()
