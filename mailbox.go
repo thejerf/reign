@@ -329,19 +329,6 @@ func (a *Address) UnmarshalText(b []byte) error {
 	return ErrIllegalAddressFormat
 }
 
-// UnmarshalJSON implements JSON unmarshalling for Addresses.
-func (a *Address) UnmarshalJSON(b []byte) error {
-	// Replace quotes with the delimeters.
-	if bytes.HasPrefix(b, []byte("\"")) {
-		b[0] = byte('<')
-	}
-	if bytes.HasSuffix(b, []byte("\"")) {
-		b[len(b)-1] = byte('>')
-	}
-
-	return a.UnmarshalText(b)
-}
-
 // MarshalText implements text marshalling for Addresses.
 //
 // See MarshalBinary.
@@ -368,6 +355,19 @@ func (a *Address) MarshalText() ([]byte, error) {
 	default:
 		return nil, errors.New("unknown address type, internal reign error")
 	}
+}
+
+// UnmarshalJSON implements JSON unmarshalling for Addresses.
+func (a *Address) UnmarshalJSON(b []byte) error {
+	// Replace quotes with the delimeters.
+	if bytes.HasPrefix(b, []byte("\"")) {
+		b[0] = byte('<')
+	}
+	if bytes.HasSuffix(b, []byte("\"")) {
+		b[len(b)-1] = byte('>')
+	}
+
+	return a.UnmarshalText(b)
 }
 
 // MarshalJSON implements JSON marshalling for Addresses.
