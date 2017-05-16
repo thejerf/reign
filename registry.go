@@ -592,7 +592,7 @@ func (r *registry) registerAll(entries registryEntries) {
 
 				if err != nil {
 					// Report on this.  This scenario could lead to persistent multiple claims.
-					r.Errorf("Error sending MultipleClaim to %q: %s", e.name, err)
+					r.Warnf("Error sending MultipleClaim to %q: %s", e.name, err)
 				}
 			}
 		}
