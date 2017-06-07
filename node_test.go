@@ -24,12 +24,12 @@ import (
 )
 
 func init() {
-	// PingInterval should be set to a small value so it doesn't unduly hang up heartbeat
+	// DefaultPingInterval should be set to a small value so it doesn't unduly hang up heartbeat
 	// tests, yet it should be large enough so as to give reign enough time to transfer
 	// the ping message and its corresponding pong message over the network before the ping
 	// timer expires.  Since these tests (or at least the HeartbeatRoundtrip test) are using
 	// nodes whose messages are traversing localhost, 1 second should be sufficient.
-	PingInterval = time.Second * 2
+	DefaultPingInterval = time.Second * 2
 }
 
 // this goes ahead and just lets the nodes talk over the network
