@@ -199,7 +199,7 @@ func TestJSONSpecErrors(t *testing.T) {
 }
 
 func TestCoverNoClustering(t *testing.T) {
-	NoClustering()
+	NoClustering(NullLogger)
 	connections.Terminate()
 
 	if connections != nil {

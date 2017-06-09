@@ -183,8 +183,8 @@ func RegisterType(value interface{}) {
 // This configures reign to work in a no-clustering state. You can use
 // all mailbox functionality, and there will be no network activity or
 // configuration required.
-func NoClustering() (ConnectionService, Names) {
-	return noClustering(NullLogger)
+func NoClustering(log ClusterLogger) (ConnectionService, Names) {
+	return noClustering(log)
 }
 
 func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
@@ -447,7 +447,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	cluster.hash = hash.Sum64()
 
 	if len(errs) > 0 {
-		return nil, nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s\n",
+		return nil, nil, fmt.Errorf("the following errors occurred in the cluster's specification:\n * %s",
 			strings.Join(errs, "\n * "),
 		)
 	}

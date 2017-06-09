@@ -70,16 +70,22 @@ var ErrCantGloballyRegister = errors.New("can't globally register this address")
 // and that the "current" situation (to the extent that is definable)
 // may change at any time.
 type MultipleClaim struct {
-	Claimants []Address
-	Name      string
+	Name string
 }
 
 type stopRegistry struct{}
 
-// synchronizeRegistry is used for unit testing
+// synchronizeRegistry is used for registry mailbox synchronization.
 type synchronizeRegistry struct {
 	ch chan voidtype
 }
+
+type registryEntry struct {
+	name      string
+	mailboxID MailboxID
+}
+
+type registryEntries []registryEntry
 
 // Names exposes some functionality of registry
 //
@@ -124,13 +130,16 @@ type synchronizeRegistry struct {
 type Names interface {
 	GetDebugger() NamesDebugger
 	Lookup(string) *Address
+	LookupAll(string) []*Address
+	MessageCount() int
+	MultipleClaimCount() int
 	Register(string, *Address) error
 	SeenNames(...string) []bool
-	Serve()
-	Stop()
 	Sync()
 	Unregister(string, *Address)
 }
+
+var _ Names = (*registry)(nil)
 
 // IMPORTANT: Do not call the private (lowercase) methods of registry without
 // taking out the lock (registry.m).  Most of the functionality required can
@@ -138,11 +147,19 @@ type Names interface {
 type registry struct {
 	ClusterLogger
 
-	mu sync.Mutex
+	mu sync.RWMutex
+
+	// multipleClaimCount gauges the number of multiple claims.
+	multipleClaimCount int
 
 	// the set of all claims understood by the local node, organized as
 	// name -> set of mailbox IDs.
 	claims map[string]map[MailboxID]voidtype
+
+	// The set of all mailboxIDs understood by the local node, organized
+	// as mailbox ID -> registryEntries, suitable for unregistering the
+	// mailbox ID from each registered name.
+	mailboxIDs map[MailboxID]registryEntries
 
 	// The map of nodes -> addresses used to communicate with those nodes.
 	// When a registration is made, this is the list of nodes that will
@@ -167,6 +184,8 @@ type NamesDebugger interface {
 	AllNames() []string
 	DumpClaims() map[string][]MailboxID
 	DumpJSON() string
+	MessageCount() int
+	MultipleClaimCount() int
 	SeenNames(...string) []bool
 }
 
@@ -180,6 +199,7 @@ func newRegistry(cs *connectionServer, node NodeID, log ClusterLogger) *registry
 
 	r := &registry{
 		claims:         make(map[string]map[MailboxID]voidtype),
+		mailboxIDs:     make(map[MailboxID]registryEntries),
 		nodeRegistries: make(map[NodeID]Address),
 		thisNode:       node,
 		ClusterLogger:  log,
@@ -222,8 +242,8 @@ func (r *registry) String() string {
 	// Since the registry's Serve() method acquires a lock receiving messages,
 	// we need to make sure that we also acquire that lock before replying to
 	// Suture's service name inquiry.
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	return fmt.Sprintf("Registry on node %d", r.thisNode)
 }
@@ -291,8 +311,8 @@ func (r *registry) Sync() {
 // generateAllNodeClaims returns a populated AllNodeClaims object suitable
 // for synchronizing mailbox claims with a remote node.
 func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	anc := internal.AllNodeClaims{
 		Node:   internal.IntNodeID(r.connectionServer.nodeID),
@@ -321,6 +341,8 @@ func (r *registry) generateAllNodeClaims() internal.AllNodeClaims {
 }
 
 func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
+	entries := make(registryEntries, 0, len(msg.Claims))
+
 	for name, mailboxIDs := range msg.Claims {
 		for intMailboxID := range mailboxIDs {
 			// Sanity check.
@@ -329,9 +351,15 @@ func (r *registry) handleAllNodeClaims(msg internal.AllNodeClaims) {
 				continue
 			}
 
-			r.register(name, MailboxID(intMailboxID))
-			r.Tracef("Synced mailbox %x for %q", intMailboxID, name)
+			entries = append(entries, registryEntry{
+				name:      name,
+				mailboxID: MailboxID(intMailboxID),
+			})
 		}
+	}
+
+	if len(entries) > 0 {
+		r.registerAll(entries)
 	}
 }
 
@@ -349,18 +377,26 @@ func (r *registry) handleConnectionStatus(msg connectionStatus) {
 		return
 	}
 
-	for name, claimants := range r.claims {
-		for claimant := range claimants {
-			if claimant.NodeID() == msg.node {
-				r.unregister(name, claimant)
-				r.Tracef("Unregistered mailbox %x for %q", claimant, name)
+	entries := registryEntries{}
+
+	r.mu.Lock()
+	for name, mailboxIDs := range r.claims {
+		for mailboxID := range mailboxIDs {
+			if mailboxID.NodeID() == msg.node {
+				entries = append(entries, registryEntry{
+					name:      name,
+					mailboxID: mailboxID,
+				})
 			}
 		}
 	}
 
-	r.mu.Lock()
 	delete(r.nodeRegistries, msg.node)
 	r.mu.Unlock()
+
+	if len(entries) > 0 {
+		r.unregisterAll(entries)
+	}
 }
 
 func (r *registry) toOtherNodes(msg interface{}) {
@@ -373,34 +409,55 @@ func (r *registry) GetDebugger() NamesDebugger {
 	return r
 }
 
-// Lookup returns an Address that can be used to send to the mailboxes
+// Lookup returns an Address that can be used to send messages to a mailbox
 // registered with the given string.
-//
-func (r *registry) Lookup(s string) *Address {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *registry) Lookup(s string) (a *Address) {
+	defer r.Tracef("Lookup for %q returned Address %q", s, a)
 
-	claims := r.claims[s]
-	claimIDs := make([]MailboxID, 0, len(claims))
+	addresses := r.LookupAll(s)
+
+	switch l := len(addresses); l {
+	case 0:
+	case 1:
+		a = addresses[0]
+	default:
+		// Pick a random Address from our list of Addresses registered to this
+		// name and return it.
+		a = addresses[rand.Intn(l)]
+	}
+
+	return
+}
+
+// LookupAll returns a slice of Addresses that can be used to send messages
+// to the mailboxes registered with the given string.
+func (r *registry) LookupAll(s string) (a []*Address) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	claims, ok := r.claims[s]
+	if !ok {
+		return
+	}
+
+	cs := r.connectionServer
+
 	for k := range claims {
-		claimIDs = append(claimIDs, k)
+		a = append(a, &Address{
+			mailboxID:        k,
+			connectionServer: cs,
+			mailbox:          nil,
+		})
 	}
 
-	// If there is nothing in the registry with the given name, return nil
-	if len(claimIDs) == 0 {
-		return nil
-	}
+	return
+}
 
-	// Pick a random ID from our list of IDs registered to this name and return it
-	id := claimIDs[rand.Intn(len(claims))]
+func (r *registry) MultipleClaimCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	r.Tracef("Lookup for %q returned MailboxID %x", s, id)
-
-	return &Address{
-		mailboxID:        id,
-		connectionServer: r.connectionServer,
-		mailbox:          nil,
-	}
+	return r.multipleClaimCount
 }
 
 // Register claims the given global name in the registry.
@@ -463,31 +520,66 @@ func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 
 // register is the internal registration function.
 func (r *registry) register(name string, mID MailboxID) {
+	r.registerAll(
+		registryEntries{
+			registryEntry{
+				name:      name,
+				mailboxID: mID,
+			},
+		},
+	)
+}
+
+// registerAll atomically registers registry entries.
+func (r *registry) registerAll(entries registryEntries) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	nameClaimants, haveNameClaimants := r.claims[name]
-	if !haveNameClaimants {
-		nameClaimants = make(map[MailboxID]voidtype)
-		r.claims[name] = nameClaimants
-	}
-
-	nameClaimants[mID] = void
-
-	// If there are multiple claims now, and one of them is local,
-	// notify our local Address of the conflict.
-	if len(nameClaimants) > 1 && mID.NodeID() == r.thisNode {
-		claimants := []Address{}
-		for claimant := range nameClaimants {
-			addr := Address{
-				mailboxID:        claimant,
-				connectionServer: r.connectionServer,
-			}
-			claimants = append(claimants, addr)
+	for _, e := range entries {
+		r.mailboxIDs[e.mailboxID] = append(r.mailboxIDs[e.mailboxID], e)
+		mailboxIDs, haveMailboxIDs := r.claims[e.name]
+		if !haveMailboxIDs {
+			mailboxIDs = make(map[MailboxID]voidtype)
+			r.claims[e.name] = mailboxIDs
 		}
-		for _, addr := range claimants {
-			r.Tracef("Sending MultipleClaim for %q to Address %x", name, addr.mailboxID)
-			addr.Send(MultipleClaim{Claimants: claimants, Name: name})
+
+		preCount := len(mailboxIDs)
+		mailboxIDs[e.mailboxID] = void
+		postCount := len(mailboxIDs)
+
+		// If there are multiple mailboxes (claimants) now and one of them is
+		// local, notify all Addresses of the conflict.
+		if postCount > 1 && e.mailboxID.NodeID() == r.thisNode {
+			for mailboxID := range mailboxIDs {
+				r.Tracef("Sending MultipleClaim for %q to Address %x", e.name, mailboxID)
+				addr := &Address{
+					mailboxID:        mailboxID,
+					connectionServer: r.connectionServer,
+				}
+
+				err := addr.Send(MultipleClaim{Name: e.name})
+
+				// Attempt to send the message to the mailbox.  If the mailbox is terminated,
+				// unregister it.  This scenario can happen when a mailbox is registered and
+				// terminated but never properly unregistered.  The MultipleClaim message will
+				// never reach its destination and the caller of Register() will never know
+				// about the multiple claim.
+				if err == ErrMailboxTerminated {
+					r.Tracef("Unregistering mailbox %q due to Mailbox Terminated error", mailboxID)
+					r.Unregister(e.name, addr)
+					continue
+				}
+
+				if err != nil {
+					// Report on this.  This scenario could lead to persistent multiple claims.
+					r.Warnf("Error sending MultipleClaim to %q: %s", e.name, err)
+				}
+			}
+		}
+
+		if preCount <= 1 && postCount > 1 {
+			// Multiple claim for the current name.
+			r.multipleClaimCount++
 		}
 	}
 }
@@ -497,37 +589,61 @@ func (r *registry) register(name string, mID MailboxID) {
 // check for anyone currently waiting for a termination notice on that
 // name and send it.
 func (r *registry) unregister(name string, mID MailboxID) {
+	r.unregisterAll(
+		registryEntries{
+			registryEntry{
+				name:      name,
+				mailboxID: mID,
+			},
+		},
+	)
+}
+
+// unregisterAll atomically unregisters registry entries.
+func (r *registry) unregisterAll(entries registryEntries) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	currentRegistrants, ok := r.claims[name]
-	if !ok {
-		return
-	}
-	delete(currentRegistrants, mID)
+	for _, e := range entries {
+		mailboxIDs, ok := r.claims[e.name]
+		if !ok {
+			continue
+		}
 
-	if len(currentRegistrants) == 0 {
-		delete(r.claims, name)
+		preCount := len(mailboxIDs)
+		delete(mailboxIDs, e.mailboxID)
+		postCount := len(mailboxIDs)
+
+		if preCount > 1 && postCount <= 1 {
+			// No longer have a multiple claim for the current name.
+			r.multipleClaimCount--
+		}
+
+		if postCount == 0 {
+			delete(r.claims, e.name)
+		}
 	}
 }
 
 // unregisterMailbox unregisters all names associated with the given mailbox ID
 func (r *registry) unregisterMailbox(mID MailboxID) {
-	// TODO: make this more efficient?
-	for name, claimants := range r.claims {
-		for claimant := range claimants {
-			if claimant == mID {
-				r.unregister(name, claimant)
-			}
-		}
+	r.mu.Lock()
+	entries, ok := r.mailboxIDs[mID]
+	if ok {
+		delete(r.mailboxIDs, mID)
+	}
+	r.mu.Unlock()
+
+	if len(entries) > 0 {
+		r.unregisterAll(entries)
 	}
 }
 
 // RegistryDebugger methods
 
 func (r *registry) DumpClaims() map[string][]MailboxID {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	copy := make(map[string][]MailboxID, len(r.claims))
 	for name := range r.claims {
@@ -548,8 +664,8 @@ func (r *registry) DumpJSON() string {
 }
 
 func (r *registry) AddressCount() (count uint) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	for _, addresses := range r.claims {
 		count += uint(len(addresses))
@@ -559,8 +675,8 @@ func (r *registry) AddressCount() (count uint) {
 }
 
 func (r *registry) AllNames() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	names := make([]string, 0, len(r.claims))
 	for name := range r.claims {
@@ -572,8 +688,8 @@ func (r *registry) AllNames() []string {
 // SeenNames returns an array where each element corresponds to whether the inputted name
 // at that index was found in the registry or not
 func (r *registry) SeenNames(names ...string) []bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	seen := make([]bool, 0, len(names))
 	for _, name := range names {

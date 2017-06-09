@@ -282,6 +282,10 @@ func (a *Address) UnmarshalText(b []byte) error {
 		return errIllegalNilSlice
 	}
 
+	if len(b) == 0 {
+		return ErrIllegalAddressFormat
+	}
+
 	// must be a mailboxID of one sort or another
 	switch b[0] {
 	case byte('<'):
@@ -329,6 +333,9 @@ func (a *Address) UnmarshalText(b []byte) error {
 //
 // See MarshalBinary.
 func (a *Address) MarshalText() ([]byte, error) {
+	// Cache the mailbox before we attempt to marshal the Address.
+	_ = a.getAddress()
+
 	switch mbox := a.mailbox.(type) {
 	case *Mailbox:
 		ClusterID := mbox.id.NodeID()
@@ -348,6 +355,37 @@ func (a *Address) MarshalText() ([]byte, error) {
 	default:
 		return nil, errors.New("unknown address type, internal reign error")
 	}
+}
+
+// UnmarshalJSON implements JSON unmarshalling for Addresses.
+func (a *Address) UnmarshalJSON(b []byte) error {
+	// Replace quotes with the delimeters.
+	if bytes.HasPrefix(b, []byte("\"")) {
+		b[0] = byte('<')
+	}
+	if bytes.HasSuffix(b, []byte("\"")) {
+		b[len(b)-1] = byte('>')
+	}
+
+	return a.UnmarshalText(b)
+}
+
+// MarshalJSON implements JSON marshalling for Addresses.
+func (a *Address) MarshalJSON() ([]byte, error) {
+	b, err := a.MarshalText()
+	if err != nil {
+		return nil, err
+	}
+
+	// Replace delimeters with quotes.
+	if bytes.HasPrefix(b, []byte("<")) {
+		b[0] = byte('"')
+	}
+	if bytes.HasSuffix(b, []byte(">")) {
+		b[len(b)-1] = byte('"')
+	}
+
+	return b, nil
 }
 
 func (a *Address) String() string {
@@ -441,13 +479,15 @@ func (m *mailboxes) mailboxByID(mID MailboxID) (mbox *Mailbox, err error) {
 		err = ErrNotLocalMailbox
 		return
 	}
+
 	m.RLock()
 	mbox, exists := m.mailboxes[mID]
 	m.RUnlock()
-	if exists {
-		return
+
+	if !exists {
+		err = ErrMailboxTerminated
 	}
-	err = ErrMailboxTerminated
+
 	return
 }
 
@@ -485,15 +525,13 @@ type Mailbox struct {
 
 func (m *Mailbox) send(msg interface{}) error {
 	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
 	if m.terminated {
-		// note: can't just defer here, Broadcast must follow Unlock in the
-		// other branch
-		m.cond.L.Unlock()
 		return ErrMailboxTerminated
 	}
 
 	m.messages = append(m.messages, message{msg})
-	m.cond.L.Unlock()
 
 	m.cond.Broadcast()
 
@@ -557,6 +595,20 @@ func (m *Mailbox) removeNotifyAddress(target *Address) {
 	}
 }
 
+// MessageCount returns the number of messages in the mailbox.
+//
+// 0 is always returned if the mailbox is terminated.
+func (m *Mailbox) MessageCount() (n int) {
+	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
+	if !m.terminated {
+		n = len(m.messages)
+	}
+
+	return
+}
+
 // ReceiveNext will receive the next message sent to this mailbox.
 // It blocks until the next message comes in, which may be forever.
 // If the mailbox is terminated, it will receive a MailboxTerminated reply.
@@ -567,12 +619,13 @@ func (m *Mailbox) ReceiveNext() interface{} {
 	// FIXME: Verify three listeners on one shared mailbox all get
 	// terminated properly.
 	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
 	for len(m.messages) == 0 && !m.terminated {
 		m.cond.Wait()
 	}
 
 	if m.terminated {
-		m.cond.L.Unlock()
 		return MailboxTerminated(m.id)
 	}
 
@@ -584,7 +637,7 @@ func (m *Mailbox) ReceiveNext() interface{} {
 	} else {
 		m.messages = m.messages[1:]
 	}
-	m.cond.L.Unlock()
+
 	return msg.msg
 }
 
@@ -616,16 +669,18 @@ func (m *Mailbox) ReceiveNextAsync() (interface{}, bool) {
 
 // ReceiveNextTimeout works like ReceiveNextAsync, but it will wait until either a message
 // is received or the timeout expires, whichever is sooner
-func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (interface{}, bool) {
+func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (msg interface{}, ok bool) {
 	startTime := time.Now()
 	endTime := startTime.Add(timeout)
+
 	for !time.Now().After(endTime) {
-		msg, ok := m.ReceiveNextAsync()
+		msg, ok = m.ReceiveNextAsync()
 		if ok {
-			return msg, true
+			return
 		}
 	}
-	return nil, false
+
+	return
 }
 
 // Receive will receive the next message sent to this mailbox that matches
@@ -710,10 +765,10 @@ func (m *Mailbox) Terminate() {
 	m.parent.connectionServer.registry.UnregisterMailbox(m.id.NodeID(), m.id)
 
 	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
 
 	// this is not redundant; m.terminated is part of what we have to lock
 	if m.terminated {
-		m.cond.L.Unlock()
 		return
 	}
 
@@ -733,7 +788,6 @@ func (m *Mailbox) Terminate() {
 	m.notificationAddresses = nil
 	m.messages = nil
 
-	m.cond.L.Unlock()
 	m.cond.Broadcast()
 }
 

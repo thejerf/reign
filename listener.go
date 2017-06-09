@@ -14,10 +14,6 @@ import (
 	"github.com/thejerf/reign/internal"
 )
 
-// PingInterval determines the minimum interval between PING messages.
-// Defaults to 30 seconds.
-var PingInterval = time.Second * 30
-
 // DeadlineInterval determine how long to keep the network connection open after
 // a successful read.  The net.Conn deadline value will be reset to time.Now().Add(DeadlineInterval)
 // upon each successful message read over the network.  Defaults to 5 minutes.
@@ -156,10 +152,11 @@ type incomingConnection struct {
 	client *NodeDefinition
 	server *NodeDefinition
 
-	conn      net.Conn // The connection we are actually using to send data
-	tcpConn   net.Conn // The raw TCP connection, no matter what we're doing
-	tls       net.Conn // The TLS connection, if any
-	pingTimer *time.Timer
+	conn           net.Conn // The connection we are actually using to send data
+	tcpConn        net.Conn // The raw TCP connection, no matter what we're doing
+	tls            net.Conn // The TLS connection, if any
+	pingTimer      *time.Timer
+	resetPingTimer chan time.Duration
 }
 
 // resetConnectionDeadline resets the network connection's deadline to
@@ -169,21 +166,6 @@ func (ic *incomingConnection) resetConnectionDeadline(d time.Duration) {
 	if err != nil {
 		ic.Errorf("Unable to set network connection deadline: %s", err)
 	}
-}
-
-// resetPingTimer accepts a duration and resets the incoming connection's
-// ping timer.  The timer is initialized if it wasn't previously set.
-func (ic *incomingConnection) resetPingTimer(d time.Duration) {
-	ic.Lock()
-	defer ic.Unlock()
-
-	if ic.pingTimer == nil {
-		ic.pingTimer = time.NewTimer(d)
-
-		return
-	}
-
-	ic.pingTimer.Reset(d)
 }
 
 func (ic *incomingConnection) send(value *internal.ClusterMessage) error {
@@ -234,21 +216,20 @@ func (ic *incomingConnection) handleConnection() {
 		}
 	}()
 
-	ic.Tracef("Node %d listener got connection", ic.server.ID)
 	err := ic.sslHandshake()
 	if err != nil {
 		// FIXME: This ought to wrap the error somehow, not smash to string,
 		// which would frankly be hypocritical
 		panic("Could not SSL handshake the incoming connection: " + err.Error())
 	}
-	ic.Tracef("Node %d listener successfully SSL'ed", ic.server.ID)
+	ic.Infof("Node %d listener successfully SSL'ed", ic.server.ID)
 
 	err = ic.clusterHandshake()
 	if err != nil {
 		ic.Errorf("Could not cluster handshake the incoming connection: " + err.Error())
 		return
 	}
-	ic.Tracef("Node %d listener successfully cluster handshook", ic.server.ID)
+	ic.Infof("Node %d listener successfully cluster handshook", ic.server.ID)
 
 	ic.remoteMailboxes = ic.mailboxesForNode(ic.client.ID)
 	ic.remoteMailboxes.setConnection(ic)
@@ -260,7 +241,7 @@ func (ic *incomingConnection) handleConnection() {
 		ic.Errorf("Could not sync registry with node %d: %s", ic.client.ID, err.Error())
 		return
 	}
-	ic.Tracef("Node %d listener successfully synced registry", ic.server.ID)
+	ic.Infof("Node %d listener successfully synced registry", ic.server.ID)
 
 	ic.handleIncomingMessages()
 }
@@ -381,47 +362,30 @@ func (ic *incomingConnection) handleIncomingMessages() {
 	var (
 		cm   internal.ClusterMessage
 		err  error
-		ping internal.ClusterMessage = internal.Ping{}
 		pong internal.ClusterMessage = internal.Pong{}
-		done                         = make(chan struct{})
 	)
 
 	// Report the successful connection, and defer the disconnection status change call.
 	ic.connectionServer.changeConnectionStatus(ic.client.ID, true)
 	defer ic.connectionServer.changeConnectionStatus(ic.client.ID, false)
 
-	defer close(done)
+	ic.resetPingTimer = make(chan time.Duration)
+	done := make(chan struct{})
+	defer func() {
+		close(ic.resetPingTimer)
+		close(done)
+	}()
+
+	go pingRemote(ic.output, ic.resetPingTimer, ic.ClusterLogger)
 
 	ic.resetConnectionDeadline(DeadlineInterval)
-
-	go func() {
-		var pErr error
-
-		// Send PING messages to the remote node at regular intervals.
-		// The pingTimer may never fire if messages come in more frequently
-		// than the PingInterval.
-		ic.resetPingTimer(PingInterval)
-
-		for {
-			select {
-			case <-ic.pingTimer.C:
-				pErr = ic.output.Encode(&ping)
-				if pErr != nil {
-					ic.Errorf("Attempted to ping node %d: %s", ic.client.ID, pErr)
-				}
-				ic.resetPingTimer(PingInterval)
-			case <-done:
-				return
-			}
-		}
-	}()
 
 	for err == nil {
 		err = ic.input.Decode(&cm)
 		switch err {
 		case nil:
 			// We received a message.  No need to PING the remote node.
-			ic.resetPingTimer(PingInterval)
+			ic.resetPingTimer <- DefaultPingInterval
 
 			switch cm.(type) {
 			case *internal.Ping:

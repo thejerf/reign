@@ -1,6 +1,7 @@
 package reign
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -473,7 +474,7 @@ func TestSendByID(t *testing.T) {
 	}
 }
 
-func getMarshalsAndTest(a address, t *testing.T) ([]byte, []byte, string) {
+func getMarshalsAndTest(a address, t *testing.T) ([]byte, []byte, []byte, string) {
 	addr := Address{a.getMailboxID(), a, nil}
 	bin, err := addr.MarshalBinary()
 	if err != nil {
@@ -483,6 +484,11 @@ func getMarshalsAndTest(a address, t *testing.T) ([]byte, []byte, string) {
 	text, err := addr.MarshalText()
 	if err != nil {
 		t.Fatal("fail to marshal text")
+	}
+
+	json, err := addr.MarshalJSON()
+	if err != nil {
+		t.Fatal("fail to marshal JSON")
 	}
 
 	s := addr.String()
@@ -510,7 +516,18 @@ func getMarshalsAndTest(a address, t *testing.T) ([]byte, []byte, string) {
 			bin, addrText.mailboxID, addr.mailboxID, addrText.mailboxID, addr.mailboxID)
 	}
 
-	return bin, text, s
+	var addrJSON Address
+	err = addrJSON.UnmarshalJSON(json)
+	if err != nil {
+		t.Fatalf("could not unmarshal the JSON %q: %s", json, err)
+	}
+	jsonID := addrJSON.mailboxID
+	if jsonID != addr.mailboxID {
+		t.Fatalf("%#v %#v %#v\nAfter unmarshalling the JSON, ids are not ==: %#v %#v",
+			bin, addrJSON.mailboxID, addr.mailboxID, addrJSON.mailboxID, addr.mailboxID)
+	}
+
+	return bin, text, json, s
 }
 
 func TestMarshaling(t *testing.T) {
@@ -528,38 +545,70 @@ func TestMarshaling(t *testing.T) {
 	mID := MailboxID(257)
 	connections.ThisNode.ID = mID.NodeID()
 	mailbox := &Mailbox{id: mID}
-	bin, text, s := getMarshalsAndTest(mailbox, t)
+	bin, text, json, s := getMarshalsAndTest(mailbox, t)
 	if !reflect.DeepEqual(bin, []byte{60, 0x81, 0x02}) {
-		t.Fatal("mailboxID did not binary marshal as expected")
+		t.Error("mailboxID did not binary marshal as expected")
 	}
 	if string(text) != "<1:1>" {
-		t.Fatal("mailboxID failed to marshal to text " + string(text))
+		t.Error("mailboxID failed to marshal to text " + string(text))
+	}
+	if string(json) != "<1:1>" {
+		t.Error("mailboxID failed to marshal to JSON " + string(json))
 	}
 	if s != "<1:1>" {
-		t.Fatal("mailboxID failed to String properly")
+		t.Error("mailboxID failed to String properly")
 	}
 
 	bra := boundRemoteAddress{MailboxID: MailboxID(257)}
-	bin, text, s = getMarshalsAndTest(bra, t)
+	bin, text, json, s = getMarshalsAndTest(bra, t)
 	if !reflect.DeepEqual(bin, []byte{60, 0x81, 0x02}) {
-		t.Fatal("bra did not binary marshal as expected")
+		t.Error("bra did not binary marshal as expected")
 	}
 	if string(text) != "<1:1>" {
-		t.Fatal("bra failed to marshal to text")
+		t.Error("bra failed to marshal to text")
+	}
+	if string(json) != "<1:1>" {
+		t.Error("bra failed to marshal to JSON")
 	}
 	if s != "<1:1>" {
-		t.Fatal("bra failed to String properly")
+		t.Error("bra failed to String properly")
 	}
 
-	bin, text, s = getMarshalsAndTest(noMailbox{}, t)
+	bin, text, json, s = getMarshalsAndTest(noMailbox{}, t)
 	if !reflect.DeepEqual(bin, []byte("X")) {
-		t.Fatal("noMailbox did not binary marshal as expected")
+		t.Error("noMailbox did not binary marshal as expected")
 	}
 	if string(text) != "X" {
-		t.Fatal("noMailbox did not text marshal as expected")
+		t.Error("noMailbox did not text marshal as expected")
+	}
+	if string(json) != "X" {
+		t.Error("noMailbox did not JSON marshal as expected")
 	}
 	if s != "X" {
-		t.Fatal("noMailbox did not String as expected")
+		t.Error("noMailbox did not String as expected")
+	}
+}
+
+func TestAddressUnmarshalJSON(t *testing.T) {
+	cs, _ := noClustering(NullLogger)
+	defer cs.Terminate()
+
+	addr1, _ := cs.NewMailbox()
+	addr1Bytes, err := addr1.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr2 := &Address{}
+	err = addr2.UnmarshalJSON(addr1Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// This will fail unless the Address has its mailbox cached.
+	_, err = json.Marshal(addr2)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -40,8 +40,8 @@ func TestNodeListenerErrors(t *testing.T) {
 	defer ntb.terminate()
 
 	nl := &nodeListener{
-		node:             ntb.c1.ThisNode,
-		connectionServer: ntb.c1,
+		node:             ntb.node1connectionServer.ThisNode,
+		connectionServer: ntb.node1connectionServer,
 		ClusterLogger:    NullLogger,
 		remoteMailboxes:  make(map[NodeID]*remoteMailboxes),
 	}
@@ -94,7 +94,7 @@ func TestListenerSSLHandshakeFailures(t *testing.T) {
 	// we never start the servers, so we only need this
 	defer ntb.terminateMailboxes()
 
-	ntb.c2.listener.failOnSSLHandshake = true
+	ntb.node2connectionServer.listener.failOnSSLHandshake = true
 	thingsTerminateOnFailure(t, ntb)
 }
 
@@ -102,7 +102,7 @@ func TestListenerClusterHandshakeFailures(t *testing.T) {
 	ntb := unstartedTestbed(nil)
 	defer ntb.terminateMailboxes()
 
-	ntb.c2.listener.failOnClusterHandshake = true
+	ntb.node2connectionServer.listener.failOnClusterHandshake = true
 	thingsTerminateOnFailure(t, ntb)
 }
 
@@ -110,7 +110,7 @@ func TestNodeSSLHandshakeFailures(t *testing.T) {
 	ntb := unstartedTestbed(nil)
 	defer ntb.terminateMailboxes()
 
-	ntb.c1.nodeConnectors[2].failOnSSLHandshake = true
+	ntb.node1connectionServer.nodeConnectors[2].failOnSSLHandshake = true
 	thingsTerminateOnFailure(t, ntb)
 }
 
@@ -118,7 +118,7 @@ func TestNodeClusterHandshakeFailure(t *testing.T) {
 	ntb := unstartedTestbed(nil)
 	defer ntb.terminateMailboxes()
 
-	ntb.c1.nodeConnectors[2].failOnClusterHandshake = true
+	ntb.node1connectionServer.nodeConnectors[2].failOnClusterHandshake = true
 	thingsTerminateOnFailure(t, ntb)
 }
 
@@ -129,22 +129,22 @@ func thingsTerminateOnFailure(t *testing.T, ntb *NetworkTestBed) {
 		defer func() {
 			done <- struct{}{}
 		}()
-		ntb.c2.listener.Serve()
+		ntb.node2connectionServer.listener.Serve()
 	}()
-	ntb.c2.waitForListen()
+	ntb.node2connectionServer.waitForListen()
 
 	// and this reaches in to directly run the "connect to node 2" function
 	go func() {
 		defer func() {
 			done <- struct{}{}
 		}()
-		ntb.c1.nodeConnectors[2].Serve()
+		ntb.node1connectionServer.nodeConnectors[2].Serve()
 	}()
 
 	// Assert that in the case of failure to connect due to SSL negotiation
 	// failures, both systems terminate, so suture can pick them up.
 	<-done
-	ntb.c2.listener.Stop()
+	ntb.node2connectionServer.listener.Stop()
 	<-done
 }
 
@@ -162,10 +162,31 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 	ntb := testbed(nil)
 	defer ntb.terminate()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		ntb.rem1_1.Send("a")
-		ntb.mailbox1_1.ReceiveNext()
+		err := ntb.fromNode2toNode1mailbox1.Send("a")
+		if err != nil {
+			b.Error(err)
+		}
+		_ = ntb.node1mailbox1.ReceiveNext()
+	}
+}
+
+func BenchmarkRegisterUnregisterMailbox(b *testing.B) {
+	ntb := testbed(nil)
+	defer ntb.terminate()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		a, m := ntb.node1connectionServer.NewMailbox()
+		ntb.node1connectionServer.registry.Register("test", a)
+		ntb.node1connectionServer.registry.Sync()
+
+		m.Terminate()
+		ntb.node1connectionServer.registry.Sync()
 	}
 }
