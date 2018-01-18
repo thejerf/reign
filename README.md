@@ -14,13 +14,14 @@ replacement for Erlang-style message passing functionality, suitable for
 porting existing Erlang programs out of Erlang without significant
 architecture overhauls.
 
-As of December 2016: The system that this was written for is now in
-production, though it's still early days. However, I still need to
-take a pass on this to ensure test coverage and documentation quality
-for public consumption.
-
-However, it is now to the point that if you want to take this for a
-spin, it is "supposed" to work. Hence I'm setting the version to 0.9.0.
+As of January, 2018: We are currently looking into rewriting the core
+to use pure channels, instead of sync.Cond. The other thing that was
+preventing me from calling this at least a "beta" release is that I
+wanted some sort of backpressure solution to match what Erlang is doing.
+However, as of this month, Erlang seems to have removed their implementation
+of backpressure, so as this is an Erlang-porting library, I'm going to
+just say we're not going to implement it. So once we have the channel
+change tested, I'm going to declare this a 0.9.1 release.
 
 PLEASE DO NOT SUBMIT TO REDDIT, HACKER NEWS, ETC... while I'd like to put
 this on there eventually, first I'd like the examples, coverage, working
