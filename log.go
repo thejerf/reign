@@ -3,6 +3,7 @@ package reign
 import (
 	"fmt"
 	"log"
+	"testing"
 )
 
 // A ClusterLogger is the logging interface used by the Cluster system.
@@ -56,35 +57,35 @@ type wrapLogger struct {
 }
 
 func (sl wrapLogger) Error(args ...interface{}) {
-	sl.logger.Output(2, "[ERROR] reign: "+fmt.Sprint(args...)+"\n")
+	_ = sl.logger.Output(2, "[ERROR] reign: "+fmt.Sprint(args...)+"\n")
 }
 
 func (sl wrapLogger) Errorf(format string, args ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[ERROR] reign: "+format+"\n", args...))
+	_ = sl.logger.Output(2, fmt.Sprintf("[ERROR] reign: "+format+"\n", args...))
 }
 
 func (sl wrapLogger) Warn(args ...interface{}) {
-	sl.logger.Output(2, "[WARN] reign: "+fmt.Sprint(args...)+"\n")
+	_ = sl.logger.Output(2, "[WARN] reign: "+fmt.Sprint(args...)+"\n")
 }
 
 func (sl wrapLogger) Warnf(format string, args ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[WARN] reign: "+format+"\n", args...))
+	_ = sl.logger.Output(2, fmt.Sprintf("[WARN] reign: "+format+"\n", args...))
 }
 
 func (sl wrapLogger) Info(args ...interface{}) {
-	sl.logger.Output(2, "[INFO] reign: "+fmt.Sprint(args...)+"\n")
+	_ = sl.logger.Output(2, "[INFO] reign: "+fmt.Sprint(args...)+"\n")
 }
 
 func (sl wrapLogger) Infof(format string, args ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[INFO] reign: "+format+"\n", args...))
+	_ = sl.logger.Output(2, fmt.Sprintf("[INFO] reign: "+format+"\n", args...))
 }
 
 func (sl wrapLogger) Trace(args ...interface{}) {
-	sl.logger.Output(2, "[TRACE] reign: "+fmt.Sprint(args...)+"\n")
+	_ = sl.logger.Output(2, "[TRACE] reign: "+fmt.Sprint(args...)+"\n")
 }
 
 func (sl wrapLogger) Tracef(format string, args ...interface{}) {
-	sl.logger.Output(2, fmt.Sprintf("[TRACE] reign: "+format+"\n", args...))
+	_ = sl.logger.Output(2, fmt.Sprintf("[TRACE] reign: "+format+"\n", args...))
 }
 
 // StdLogger is a ClusterLogger that will use the log.Output function
@@ -125,6 +126,42 @@ func (sl stdLogger) Tracef(format string, args ...interface{}) {
 	fmt.Printf("[TRACE] reign: "+format+"\n", args...)
 }
 
+type testLogger struct {
+	t *testing.T
+}
+
+func (tl testLogger) Error(args ...interface{}) {
+	tl.t.Log("[ERROR] reign: " + fmt.Sprint(args...))
+}
+
+func (tl testLogger) Errorf(format string, args ...interface{}) {
+	tl.t.Logf("[ERROR] reign: "+format+"\n", args...)
+}
+
+func (tl testLogger) Warn(args ...interface{}) {
+	tl.t.Log("[WARN] reign: " + fmt.Sprint(args...))
+}
+
+func (tl testLogger) Warnf(format string, args ...interface{}) {
+	tl.t.Logf("[WARN] reign: "+format+"\n", args...)
+}
+
+func (tl testLogger) Info(args ...interface{}) {
+	tl.t.Log("[INFO] reign: " + fmt.Sprint(args...))
+}
+
+func (tl testLogger) Infof(format string, args ...interface{}) {
+	tl.t.Logf("[INFO] reign: "+format+"\n", args...)
+}
+
+func (tl testLogger) Trace(args ...interface{}) {
+	tl.t.Log("[TRACE] reign: " + fmt.Sprint(args...))
+}
+
+func (tl testLogger) Tracef(format string, args ...interface{}) {
+	tl.t.Logf("[TRACE] reign: "+format+"\n", args...)
+}
+
 // NullLogger implements ClusterLogger, and throws all logging messages away.
 var NullLogger = nullLogger{}
 
@@ -140,7 +177,8 @@ func (nl nullLogger) Trace(args ...interface{})                 {}
 func (nl nullLogger) Tracef(format string, args ...interface{}) {}
 
 var (
-	_ ClusterLogger = (*wrapLogger)(nil)
-	_ ClusterLogger = (*stdLogger)(nil)
 	_ ClusterLogger = (*nullLogger)(nil)
+	_ ClusterLogger = (*stdLogger)(nil)
+	_ ClusterLogger = (*testLogger)(nil)
+	_ ClusterLogger = (*wrapLogger)(nil)
 )

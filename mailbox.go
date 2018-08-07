@@ -53,6 +53,7 @@ type address interface {
 	notifyAddressOnTerminate(*Address)
 	removeNotifyAddress(*Address)
 	canBeGloballyRegistered() bool
+	canBeGloballyUnregistered() bool
 	getMailboxID() MailboxID
 }
 
@@ -89,7 +90,17 @@ func (a *Address) canBeGloballyRegistered() bool {
 	if a.mailbox == nil {
 		a.getAddress()
 	}
+
 	return a.mailbox.canBeGloballyRegistered()
+}
+
+func (a *Address) canBeGloballyUnregistered() bool {
+	// If no mailbox is cached, resolve it now
+	if a.mailbox == nil {
+		a.getAddress()
+	}
+
+	return a.mailbox.canBeGloballyUnregistered()
 }
 
 func (a *Address) getAddress() address {
@@ -210,7 +221,7 @@ func (a *Address) MarshalBinary() ([]byte, error) {
 
 	switch mbox := addr.(type) {
 	case *Mailbox:
-		b := make([]byte, 10, 10)
+		b := make([]byte, 10)
 		written := binary.PutUvarint(b, uint64(mbox.id))
 		return append([]byte("<"), b[:written]...), nil
 
@@ -218,7 +229,7 @@ func (a *Address) MarshalBinary() ([]byte, error) {
 		return []byte("X"), nil
 
 	case boundRemoteAddress:
-		b := make([]byte, 10, 10)
+		b := make([]byte, 10)
 		written := binary.PutUvarint(b, uint64(mbox.MailboxID))
 		return append([]byte("<"), b[:written]...), nil
 
@@ -474,10 +485,9 @@ func (m *mailboxes) sendByID(mID MailboxID, msg interface{}) error {
 	return mailbox.send(msg)
 }
 
-func (m *mailboxes) mailboxByID(mID MailboxID) (mbox *Mailbox, err error) {
+func (m *mailboxes) mailboxByID(mID MailboxID) (*Mailbox, error) {
 	if mID.NodeID() != m.nodeID {
-		err = ErrNotLocalMailbox
-		return
+		return nil, ErrNotLocalMailbox
 	}
 
 	m.RLock()
@@ -485,17 +495,10 @@ func (m *mailboxes) mailboxByID(mID MailboxID) (mbox *Mailbox, err error) {
 	m.RUnlock()
 
 	if !exists {
-		err = ErrMailboxTerminated
+		return nil, ErrMailboxTerminated
 	}
 
-	return
-}
-
-func (m *mailboxes) mailboxCount() int {
-	m.RLock()
-	defer m.RUnlock()
-
-	return len(m.mailboxes)
+	return mbox, nil
 }
 
 // Returns a new set of mailboxes. This is used by the clustering
@@ -542,6 +545,10 @@ func (m *Mailbox) canBeGloballyRegistered() bool {
 	return true
 }
 
+func (m *Mailbox) canBeGloballyUnregistered() bool {
+	return true
+}
+
 func (m *Mailbox) getMailboxID() MailboxID {
 	return m.id
 }
@@ -551,7 +558,8 @@ func (m *Mailbox) notifyAddressOnTerminate(target *Address) {
 	defer m.cond.L.Unlock()
 
 	if m.terminated {
-		target.Send(MailboxTerminated(m.id))
+		_ = target.Send(MailboxTerminated(m.id))
+
 		return
 	}
 
@@ -598,15 +606,15 @@ func (m *Mailbox) removeNotifyAddress(target *Address) {
 // MessageCount returns the number of messages in the mailbox.
 //
 // 0 is always returned if the mailbox is terminated.
-func (m *Mailbox) MessageCount() (n int) {
+func (m *Mailbox) MessageCount() int {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
 	if !m.terminated {
-		n = len(m.messages)
+		return len(m.messages)
 	}
 
-	return
+	return 0
 }
 
 // ReceiveNext will receive the next message sent to this mailbox.
@@ -669,18 +677,18 @@ func (m *Mailbox) ReceiveNextAsync() (interface{}, bool) {
 
 // ReceiveNextTimeout works like ReceiveNextAsync, but it will wait until either a message
 // is received or the timeout expires, whichever is sooner
-func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (msg interface{}, ok bool) {
+func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (interface{}, bool) {
 	startTime := time.Now()
 	endTime := startTime.Add(timeout)
 
 	for !time.Now().After(endTime) {
-		msg, ok = m.ReceiveNextAsync()
+		msg, ok := m.ReceiveNextAsync()
 		if ok {
-			return
+			return msg, ok
 		}
 	}
 
-	return
+	return nil, false
 }
 
 // Receive will receive the next message sent to this mailbox that matches
@@ -693,9 +701,10 @@ func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (msg interface{}, ok
 //
 // I recommend that your matcher function be:
 //
-//  func (i) (ok bool) {
+//  func (i) bool {
 //      _, ok = i.(SomeType)
-//      return
+//
+//      return ok
 //  }
 //
 // If the mailbox gets terminated, this will return a MailboxTerminated,
@@ -761,9 +770,6 @@ func (m *Mailbox) Terminate() {
 	// out of this dict is OK.
 	m.parent.unregisterMailbox(m.id)
 
-	// Unregister myself all the names that point to me
-	m.parent.connectionServer.registry.UnregisterMailbox(m.id.NodeID(), m.id)
-
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
@@ -781,7 +787,7 @@ func (m *Mailbox) Terminate() {
 			mailboxID:        mailboxID,
 			connectionServer: cs,
 		}
-		addr.Send(terminating)
+		_ = addr.Send(terminating)
 	}
 
 	// chuck out what garbage we can
@@ -809,7 +815,7 @@ func (nm noMailbox) send(interface{}) error {
 }
 
 func (nm noMailbox) notifyAddressOnTerminate(target *Address) {
-	target.Send(MailboxTerminated(nm.MailboxID))
+	_ = target.Send(MailboxTerminated(nm.MailboxID))
 }
 
 func (nm noMailbox) removeNotifyAddress(target *Address) {}
@@ -820,6 +826,10 @@ func (nm noMailbox) getMailboxID() MailboxID {
 
 func (nm noMailbox) canBeGloballyRegistered() bool {
 	return false
+}
+
+func (nm noMailbox) canBeGloballyUnregistered() bool {
+	return true
 }
 
 // A boundRemoteAddress is only used for testing in the "multinode"
@@ -847,7 +857,7 @@ func (bra boundRemoteAddress) send(message interface{}) error {
 func (bra boundRemoteAddress) notifyAddressOnTerminate(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
-	bra.remoteMailboxes.Send(
+	_ = bra.remoteMailboxes.Send(
 		internal.NotifyRemote{
 			Remote: internal.IntMailboxID(bra.MailboxID),
 			Local:  internal.IntMailboxID(addr.mailboxID),
@@ -858,7 +868,7 @@ func (bra boundRemoteAddress) notifyAddressOnTerminate(addr *Address) {
 func (bra boundRemoteAddress) removeNotifyAddress(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
-	bra.remoteMailboxes.Send(
+	_ = bra.remoteMailboxes.Send(
 		internal.UnnotifyRemote{
 			Remote: internal.IntMailboxID(bra.MailboxID),
 			Local:  internal.IntMailboxID(addr.mailboxID),
@@ -871,5 +881,9 @@ func (bra boundRemoteAddress) getMailboxID() MailboxID {
 }
 
 func (bra boundRemoteAddress) canBeGloballyRegistered() bool {
+	return false
+}
+
+func (bra boundRemoteAddress) canBeGloballyUnregistered() bool {
 	return false
 }

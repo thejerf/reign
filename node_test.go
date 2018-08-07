@@ -37,7 +37,7 @@ func init() {
 // This function grabs the test bed and runs basic tests on it to
 // establish that it is fundamentally working.
 func TestMinimalTestBed(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	if ntb.node1address1.mailboxID == ntb.node2address1.mailboxID {
@@ -47,7 +47,9 @@ func TestMinimalTestBed(t *testing.T) {
 	// Send "hello" from node 2 for address1 on node 1, destined
 	// for mailbox1 on node 1.
 	m := "hello"
-	ntb.fromNode2toNode1mailbox1.Send(m)
+	if err := ntb.fromNode2toNode1mailbox1.Send(m); err != nil {
+		t.Fatal(err)
+	}
 
 	// Receive the message in mailbox1 on node 1.
 	msg, ok := ntb.node1mailbox1.ReceiveNextTimeout(timeout)
@@ -59,7 +61,9 @@ func TestMinimalTestBed(t *testing.T) {
 	}
 
 	m = "world"
-	ntb.fromNode2toNode1mailbox2.Send(m)
+	if err := ntb.fromNode2toNode1mailbox2.Send(m); err != nil {
+		t.Fatal(err)
+	}
 	msg, ok = ntb.node2mailbox1.ReceiveNextTimeout(timeout)
 	if !ok {
 		t.Fatalf("Did not receive %q message", m)
@@ -69,7 +73,9 @@ func TestMinimalTestBed(t *testing.T) {
 	}
 
 	m = "Checking 1_2"
-	ntb.fromNode2toNode1mailbox2.Send(m)
+	if err := ntb.fromNode2toNode1mailbox2.Send(m); err != nil {
+		t.Fatal(err)
+	}
 	msg, ok = ntb.node2mailbox1.ReceiveNextTimeout(timeout)
 	if !ok {
 		t.Fatalf("Did not receive %q message", m)
@@ -79,7 +85,9 @@ func TestMinimalTestBed(t *testing.T) {
 	}
 
 	m = "Checking 2_2"
-	ntb.fromNode1toNode2mailbox2.Send(m)
+	if err := ntb.fromNode1toNode2mailbox2.Send(m); err != nil {
+		t.Fatal(err)
+	}
 	msg, ok = ntb.node2mailbox2.ReceiveNextTimeout(timeout)
 	if !ok {
 		t.Fatalf("Did not receive %q message", m)
@@ -90,13 +98,15 @@ func TestMinimalTestBed(t *testing.T) {
 }
 
 func TestMessagesCanSendMailboxes(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	// Here we send address1_2 a reference to address1_1, from the POV
 	// where address1_1 is local. Can we then use that to send to
 	// address1_1 from the remote node?
-	ntb.fromNode2toNode1mailbox2.Send(ntb.node1address1)
+	if err := ntb.fromNode2toNode1mailbox2.Send(ntb.node1address1); err != nil {
+		t.Fatal(err)
+	}
 	sa, ok := ntb.node2mailbox1.ReceiveNextTimeout(timeout)
 	if !ok {
 		t.Fatal("No message received")
@@ -109,7 +119,9 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 	// fixup the connectionServer
 	sentAddr.connectionServer = ntb.node2connectionServer
 
-	sentAddr.Send("ack")
+	if err := sentAddr.Send("ack"); err != nil {
+		t.Fatal(err)
+	}
 	received, ok := ntb.node1mailbox1.ReceiveNextTimeout(timeout)
 	if !ok {
 		t.Fatal("No message received")
@@ -121,7 +133,7 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 
 // Little tests which just get some coverage out of the way.
 func TestCoverage(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 
 	if !panics(func() { newConnections(nil, NodeID(1)) }) {
 		t.Fatal("Didn't panic with bad newConnections: no cluster")
@@ -137,7 +149,7 @@ func TestCoverage(t *testing.T) {
 	// set a null cluster so that we've already declared one, then test
 	// that we can't declare another.
 	NoClustering(NullLogger)
-	if !panics(func() { createFromSpec(testSpec(), 10, NullLogger) }) {
+	if !panics(func() { _, _, _ = createFromSpec(testSpec(), 10, NullLogger) }) {
 		t.Fatal("createFromSpec does not object to double-creating connections")
 	}
 
@@ -156,7 +168,7 @@ func TestCoverage(t *testing.T) {
 //   message goes across, the link to the node terminates.
 
 func TestHappyPathRemoteLink(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	// from the perspective of node 1, "Mr. Mailbox 1_2 on node 2,
@@ -186,7 +198,7 @@ func TestHappyPathRemoteLink(t *testing.T) {
 // This tests what happens if we have two notifications, and then
 // unnotify one of them. We still want to receive the termination notice.
 func TestHappyPathPartialUnnotify(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	// this is used to determine when the remote mailboxes have
@@ -194,13 +206,16 @@ func TestHappyPathPartialUnnotify(t *testing.T) {
 	// should produce no message sent to node 2 (since there will still
 	// be a listener for the message), that's all we have to sync on.
 	gotUnnotifyRemote := make(chan struct{})
-	ntb.node1remoteMailboxes.Send(newDoneProcessing{func(x interface{}) bool {
+	err := ntb.node1remoteMailboxes.Send(newDoneProcessing{func(x interface{}) bool {
 		_, isUnnotifyRemote := x.(internal.UnnotifyRemote)
 		if isUnnotifyRemote {
 			gotUnnotifyRemote <- void
 		}
 		return !isUnnotifyRemote
 	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Add notifications on 1_1 to both mailboxes on node 1
 	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address1)
@@ -225,7 +240,7 @@ func TestHappyPathPartialUnnotify(t *testing.T) {
 // This is like the previous test, except that we add two notifications
 // and remove both of them.
 func TestHappyPathFullUnnotify(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address1)
@@ -234,13 +249,16 @@ func TestHappyPathFullUnnotify(t *testing.T) {
 	// now, verify that the other side does indeed get a full Remove
 	// command when we remove the other notify address
 	gotRemoveNotifyNode := make(chan struct{})
-	ntb.node2remoteMailboxes.Send(newDoneProcessing{func(x interface{}) bool {
+	err := ntb.node2remoteMailboxes.Send(newDoneProcessing{func(x interface{}) bool {
 		_, isRNNOT := x.(*internal.RemoveNotifyNodeOnTerminate)
 		if isRNNOT {
 			gotRemoveNotifyNode <- void
 		}
 		return !isRNNOT
 	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ntb.fromNode2toNode1mailbox2.RemoveNotifyAddress(ntb.node1address1)
 	ntb.fromNode2toNode1mailbox2.RemoveNotifyAddress(ntb.node1address2)
 
@@ -249,22 +267,25 @@ func TestHappyPathFullUnnotify(t *testing.T) {
 }
 
 func TestRemoteLinkErrorPaths(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	setConnections(ntb.node1connectionServer)
 
 	// Send the remoteMailbox a message for the wrong node. (Verified that
 	// this goes down the right code path via coverage analysis.)
-	ntb.node2remoteMailboxes.Send(&internal.IncomingMailboxMessage{
+	err := ntb.node2remoteMailboxes.Send(&internal.IncomingMailboxMessage{
 		Target:  internal.IntMailboxID(ntb.node1mailbox1.id),
 		Message: "moo",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(time.Second)
 }
 
 func TestConnectionPanicsClient(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	c := make(chan struct{})
@@ -272,14 +293,17 @@ func TestConnectionPanicsClient(t *testing.T) {
 		c <- struct{}{}
 	}
 
-	ntb.node2remoteMailboxes.Send(internal.PanicHandler{})
+	err := ntb.node2remoteMailboxes.Send(internal.PanicHandler{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// this proves the connection was re-established.
 	<-c
 }
 
 func TestConnectionPanicsServer(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	c := make(chan struct{})
@@ -290,14 +314,17 @@ func TestConnectionPanicsServer(t *testing.T) {
 	}
 	ntb.node1remoteMailboxes.Unlock()
 
-	ntb.node1remoteMailboxes.Send(internal.PanicHandler{})
+	err := ntb.node1remoteMailboxes.Send(internal.PanicHandler{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// this proves the connection was re-established.
 	<-c
 }
 
 func TestConnectionDiesClient(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	c := make(chan struct{})
@@ -305,13 +332,16 @@ func TestConnectionDiesClient(t *testing.T) {
 		c <- struct{}{}
 	}
 
-	ntb.node2remoteMailboxes.Send(internal.DestroyConnection{})
+	err := ntb.node2remoteMailboxes.Send(internal.DestroyConnection{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	<-c
 }
 
 func TestConnectionDiesServer(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	c := make(chan struct{})
@@ -322,13 +352,16 @@ func TestConnectionDiesServer(t *testing.T) {
 	}
 	ntb.node1remoteMailboxes.Unlock()
 
-	ntb.node1remoteMailboxes.Send(internal.DestroyConnection{})
+	err := ntb.node1remoteMailboxes.Send(internal.DestroyConnection{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	<-c
 }
 
 func TestHeartbeatRoundtrip(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	// Set the peekFunc() on c1's node connection to c2 object.
@@ -339,9 +372,10 @@ func TestHeartbeatRoundtrip(t *testing.T) {
 
 	// Take a peek at the first two messages. The only messages sent between nodes of
 	// this ntb should be alternating PING and PONG messages.  Make sure we get one
-	// of each.
-	for i := 0; i < 2; i++ {
+	// of each.  There may be an AllNodeClaims message in there as well.
+	for i := 0; i < 3; i++ {
 		switch cm := <-c; cm.(type) {
+		case *internal.AllNodeClaims:
 		case *internal.Ping:
 			recPing = true
 		case *internal.Pong:
@@ -362,5 +396,5 @@ func TestHeartbeatRoundtrip(t *testing.T) {
 func TestCoverRemoteMailboxes(t *testing.T) {
 	rm := new(remoteMailboxes)
 	rm.ClusterLogger = NullLogger
-	rm.send(internal.PanicHandler{}, "")
+	_ = rm.send(internal.PanicHandler{})
 }

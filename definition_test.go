@@ -222,7 +222,7 @@ type FakeReader struct {
 	err error
 }
 
-func (fr FakeReader) Read([]byte) (n int, err error) {
+func (fr FakeReader) Read([]byte) (int, error) {
 	return 0, fr.err
 }
 
@@ -231,7 +231,7 @@ func tmpFile(prefix string, contents []byte) (string, func()) {
 	if tmpFile == nil || err != nil {
 		panic("Could not create tmpFile properly. Please check permissions & stuff")
 	}
-	defer tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 	l, err := tmpFile.Write(contents)
 	if err != nil {
 		panic(err)

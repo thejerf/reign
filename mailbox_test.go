@@ -25,6 +25,10 @@ func (f FakeMailbox) canBeGloballyRegistered() bool {
 	return false
 }
 
+func (f FakeMailbox) canBeGloballyUnregistered() bool {
+	return false
+}
+
 func (f FakeMailbox) notifyAddressOnTerminate(_ *Address) {}
 
 func (f FakeMailbox) removeNotifyAddress(_ *Address) {}
@@ -58,7 +62,9 @@ func TestMailboxReceiveNext(t *testing.T) {
 		}
 	}()
 
-	a.Send("hello")
+	if err := a.Send("hello"); err != nil {
+		t.Fatal()
+	}
 	received := <-msgs
 
 	if received.(string) != "hello" {
@@ -67,10 +73,18 @@ func TestMailboxReceiveNext(t *testing.T) {
 
 	// this tests that messages can stack up, the goroutine above blocks on
 	// trying to send the first one out on the chan
-	a.Send("1")
-	a.Send("2")
-	a.Send("3")
-	a.Send(Stop{})
+	if err := a.Send("1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send("2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send("3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send(Stop{}); err != nil {
+		t.Fatal(err)
+	}
 
 	received = <-msgs
 	if received.(string) != "1" {
@@ -97,7 +111,9 @@ func TestMailboxReceiveNextAsync(t *testing.T) {
 
 	msgs := []string{"1", "2", "3"}
 	for _, msg := range msgs {
-		a.Send(msg)
+		if err := a.Send(msg); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	for _, msg := range msgs {
@@ -124,7 +140,9 @@ func TestMailboxReceiveNextTimeout(t *testing.T) {
 
 	msgs := []string{"1", "2", "3"}
 	for _, msg := range msgs {
-		a.Send(msg)
+		if err := a.Send(msg); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	for _, msg := range msgs {
@@ -198,9 +216,15 @@ func TestMailboxReceive(t *testing.T) {
 
 	// to keep track of what the mailbox should have, we'll keep a list in
 	// the comments here:
-	a.Send(b)
-	a.Send(c)
-	a.Send(d)
+	if err := a.Send(b); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send(d); err != nil {
+		t.Fatal(err)
+	}
 
 	// contains: [b, c, d]
 	matches <- matchC
@@ -220,26 +244,39 @@ func TestMailboxReceive(t *testing.T) {
 
 	// now test the case where we don't have the message we want
 	waitingDone := make(chan bool)
+	fatal := make(chan struct{})
 	go func() {
 		matches <- matchC
 		msg := <-msgs
 		if _, ok := msg.(C); !ok {
-			t.Fatal("Did not retrieve the correct message")
+			close(fatal)
 		}
 		waitingDone <- true
 	}()
 
+	match := func() {
+		select {
+		case <-matching:
+		case <-fatal:
+			t.Fatal("Did not retrieve the correct message")
+		}
+	}
+
 	// will run two matches against what is already there (b, d), then wait
-	<-matching
-	<-matching
+	match()
+	match()
 	// Receive() will be at m.cond.Wait() at this point, allowing us to lock
 	// the mutex and send d.
-	a.Send(d)
+	if err := a.Send(d); err != nil {
+		t.Fatal(err)
+	}
 	// Pick up reading from where we left off.  We won't match on d.
-	<-matching
-	a.Send(c)
+	match()
+	if err := a.Send(c); err != nil {
+		t.Fatal(err)
+	}
 	// We will match on c we just sent.
-	<-matching
+	match()
 	<-waitingDone
 
 	if !reflect.DeepEqual(m.messages, []message{{b}, {d}, {d}}) {
@@ -253,7 +290,9 @@ func TestMailboxReceive(t *testing.T) {
 	// Alternatively, we could send matchStop, read from matching 3 times to progress Receive()
 	// to m.cond.Wait().  This would release the mutex so Send() can acquire it and deliver the
 	// Stop message.  The subsequent read from matching will successfully match on the Stop message.
-	a.Send(Stop{})
+	if err := a.Send(Stop{}); err != nil {
+		t.Fatal(err)
+	}
 	matches <- matchStop
 	// match against the three messages in the queue
 	<-matching
@@ -265,7 +304,35 @@ func TestMailboxReceive(t *testing.T) {
 	<-done
 }
 
-func TestBasicTerminate(t *testing.T) {
+func TestSimpleMailboxTerminate(t *testing.T) {
+	cs, _ := noClustering(NullLogger)
+	defer cs.Terminate()
+
+	addr, mailbox := connections.NewMailbox()
+
+	// Make certain the mailbox is empty.
+	m, ok := mailbox.ReceiveNextAsync()
+	if ok {
+		t.Fatalf("Received an unexpected message: %#v", m)
+	}
+
+	// Deliver a message to the mailbox.
+	err := addr.Send("Hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The mailbox currently has one message in it.  However, we should
+	// only receive the MailboxTerminated message after we terminate the
+	// mailbox, *not* the "Hello" message.
+	mailbox.Terminate()
+	m, ok = mailbox.ReceiveNextAsync()
+	if _, terminated := m.(MailboxTerminated); !ok || !terminated {
+		t.Fatalf("Expected a MailboxTerminated message: %#v", m)
+	}
+}
+
+func TestTerminate(t *testing.T) {
 	cs, _ := noClustering(NullLogger)
 	defer cs.Terminate()
 
@@ -287,8 +354,7 @@ func TestBasicTerminate(t *testing.T) {
 		t.Fatal("Terminate did not send the right termination message")
 	}
 
-	err := addr1.Send("message")
-	if err != ErrMailboxTerminated {
+	if err := addr1.Send("message"); err != ErrMailboxTerminated {
 		t.Fatal("Sending to a closed mailbox does not yield the terminated error")
 	}
 
@@ -358,7 +424,9 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 		done <- struct{}{}
 	}()
 
-	addr1.Send(1)
+	if err := addr1.Send(1); err != nil {
+		t.Fatal(err)
+	}
 
 	<-done
 
@@ -719,7 +787,10 @@ func TestCoverAddressMarshaling(t *testing.T) {
 
 	a2.UnmarshalFromID(a.mailboxID)
 	a2.connectionServer = connections
-	a2.Send("test")
+	err = a2.Send("test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	msg, ok := m1.ReceiveNextAsync()
 	if !ok {

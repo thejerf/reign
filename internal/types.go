@@ -58,8 +58,8 @@ func init() {
 	var _ ClusterMessage = (*RegistryMailbox)(nil)
 	gob.Register(&rm)
 
-	var rs RegistrySync
-	var _ ClusterMessage = (*RegistrySync)(nil)
+	var rs RegisterRemoteNode
+	var _ ClusterMessage = (*RegisterRemoteNode)(nil)
 	gob.Register(&rs)
 
 	var rmt RemoteMailboxTerminated
@@ -190,14 +190,13 @@ type RegistryMailbox struct {
 
 func (rm *RegistryMailbox) isClusterMessage() {}
 
-// RegistrySync is part of the internal registry's private communication.
-type RegistrySync struct {
+// RegisterRemoteNode is part of the internal registry's private communication.
+type RegisterRemoteNode struct {
 	Node      IntNodeID
 	MailboxID IntMailboxID
-	Claims    AllNodeClaims
 }
 
-func (rs *RegistrySync) isClusterMessage() {}
+func (rs *RegisterRemoteNode) isClusterMessage() {}
 
 // RemoteMailboxTerminated is an internal message, public only for gob's
 // sake.

@@ -99,9 +99,13 @@ func testSpec() *ClusterSpec {
 	}
 }
 
-func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
+func unstartedTestbed(spec *ClusterSpec, l ClusterLogger) *NetworkTestBed {
 	if spec == nil {
 		spec = testSpec()
+	}
+
+	if l == nil {
+		l = NullLogger
 	}
 
 	ntb := &NetworkTestBed{}
@@ -111,7 +115,7 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	spec.NodeKeyPEM = string(node2_1Key)
 	spec.NodeCertPEM = string(node2_1Cert)
 	setConnections(nil)
-	ntb.node2connectionServer, _, err = createFromSpec(spec, 2, NullLogger)
+	ntb.node2connectionServer, _, err = createFromSpec(spec, 2, l)
 	if err != nil {
 		panic(err)
 	}
@@ -119,7 +123,7 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 
 	spec.NodeKeyPEM = string(node1_1Key)
 	spec.NodeCertPEM = string(node1_1Cert)
-	ntb.node1connectionServer, _, err = createFromSpec(spec, 1, NullLogger)
+	ntb.node1connectionServer, _, err = createFromSpec(spec, 1, l)
 	if err != nil {
 		panic(err)
 	}
@@ -162,11 +166,11 @@ func unstartedTestbed(spec *ClusterSpec) *NetworkTestBed {
 	return ntb
 }
 
-func testbed(spec *ClusterSpec) *NetworkTestBed {
+func testbed(spec *ClusterSpec, l ClusterLogger) *NetworkTestBed {
 	if spec == nil {
 		spec = testSpec()
 	}
-	ntb := unstartedTestbed(spec)
+	ntb := unstartedTestbed(spec, l)
 
 	go ntb.node2connectionServer.Serve()
 	ntb.node2connectionServer.waitForListen()

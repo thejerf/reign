@@ -187,7 +187,7 @@ func NoClustering(log ClusterLogger) (ConnectionService, Names) {
 	return noClustering(log)
 }
 
-func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
+func noClustering(log ClusterLogger) (*connectionServer, *registry) {
 	nodeID := NodeID(0)
 	clusterSpec := &ClusterSpec{
 		Nodes: []*NodeDefinition{
@@ -198,9 +198,9 @@ func noClustering(log ClusterLogger) (cs *connectionServer, r *registry) {
 		},
 	}
 
-	cs, r, _ = createFromSpec(clusterSpec, nodeID, log)
+	cs, r, _ := createFromSpec(clusterSpec, nodeID, log)
 
-	return
+	return cs, r
 }
 
 func setConnections(c *connectionServer) {
@@ -224,13 +224,12 @@ func CreateFromSpecFile(clusterSpecLocation string, thisNode NodeID, log Cluster
 	return createFromSpecFile(clusterSpecLocation, thisNode, log)
 }
 
-func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (s ConnectionService, n Names, err error) {
-	var f *os.File
-	f, err = os.Open(clusterSpecLocation)
+func createFromSpecFile(clusterSpecLocation string, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
+	f, err := os.Open(clusterSpecLocation)
 	if err != nil {
-		return
+		return nil, nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return createFromReader(f, thisNode, log)
 }
@@ -240,21 +239,20 @@ func CreateFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (Connecti
 	return createFromReader(r, thisNode, log)
 }
 
-func createFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (cs *connectionServer, n Names, err error) {
-	var contents []byte
-	contents, err = ioutil.ReadAll(r)
+func createFromReader(r io.Reader, thisNode NodeID, log ClusterLogger) (*connectionServer, Names, error) {
+	contents, err := ioutil.ReadAll(r)
 	if err != nil {
-		return
+		return nil, nil, err
 	}
 
 	return createFromJSON(contents, thisNode, log)
 }
 
-func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (cs *connectionServer, r *registry, err error) {
+func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (*connectionServer, *registry, error) {
 	clusterSpec := ClusterSpec{}
-	err = json.Unmarshal(contents, &clusterSpec)
+	err := json.Unmarshal(contents, &clusterSpec)
 	if err != nil {
-		return
+		return nil, nil, err
 	}
 
 	// since we can't trust the json decoding to produce legal values,
@@ -264,9 +262,8 @@ func createFromJSON(contents []byte, thisNode NodeID, log ClusterLogger) (cs *co
 
 // CreateFromSpec creates a cluster directly from a *ClusterSpec, the
 // ultimate in control.
-func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (cs ConnectionService, n Names, err error) {
-	cs, n, err = createFromSpec(spec, thisNode, log)
-	return
+func CreateFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (ConnectionService, Names, error) {
+	return createFromSpec(spec, thisNode, log)
 }
 
 func (c *Cluster) tlsConfig(serverNode NodeID) *tls.Config {
@@ -381,9 +378,9 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 
 	// Validate the cert's node is the common name for the cert
 	if len(cert.Certificate) > 0 {
-		x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
-		if err != nil {
-			errs = append(errs, err.Error())
+		x509Cert, cErr := x509.ParseCertificate(cert.Certificate[0])
+		if cErr != nil {
+			errs = append(errs, cErr.Error())
 		} else if nodeID := fmt.Sprintf("%d", thisNode); x509Cert.Subject.CommonName != nodeID {
 			errs = append(errs, fmt.Sprintf("The current node ID (%s) does not match the certificate's common name (%s)", nodeID, x509Cert.Subject.CommonName))
 		}
@@ -391,9 +388,9 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 
 	var clusterCertPEM []byte
 	if spec.ClusterCertPath != "" {
-		certFile, err := ioutil.ReadFile(spec.ClusterCertPath)
-		if err != nil {
-			errs = append(errs, "Error from loading the cluster cert from disk: "+err.Error())
+		certFile, cErr := ioutil.ReadFile(spec.ClusterCertPath)
+		if cErr != nil {
+			errs = append(errs, "Error from loading the cluster cert from disk: "+cErr.Error())
 		}
 		clusterCertPEM = certFile
 	} else if spec.ClusterCertPEM != "" {
@@ -407,9 +404,9 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 		} else if certDERBlock.Type != "CERTIFICATE" {
 			errs = append(errs, "Cluster cert not the first thing found in cluster cert file")
 		} else {
-			clusterCert, err := x509.ParseCertificate(certDERBlock.Bytes)
-			if err != nil {
-				errs = append(errs, "Cluster cert not valid: "+err.Error())
+			clusterCert, cErr := x509.ParseCertificate(certDERBlock.Bytes)
+			if cErr != nil {
+				errs = append(errs, "Cluster cert not valid: "+cErr.Error())
 			} else {
 				verifyPool := x509.NewCertPool()
 				verifyPool.AddCert(clusterCert)
@@ -441,9 +438,15 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	// are on the same cluster specification at startup.
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
-	enc.Encode(spec)
+	err = enc.Encode(spec)
+	if err != nil {
+		return nil, nil, err
+	}
 	hash := fnv.New64a()
-	hash.Write(buf.Bytes())
+	_, err = hash.Write(buf.Bytes())
+	if err != nil {
+		return nil, nil, err
+	}
 	cluster.hash = hash.Sum64()
 
 	if len(errs) > 0 {
