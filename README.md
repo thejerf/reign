@@ -1,4 +1,4 @@
-reign 0.9.0
+reign 0.9.1
 ===========
 
 [![Build Status](https://travis-ci.org/thejerf/reign.png?branch=master)](https://travis-ci.org/thejerf/reign)
@@ -14,32 +14,9 @@ replacement for Erlang-style message passing functionality, suitable for
 porting existing Erlang programs out of Erlang without significant
 architecture overhauls.
 
-As of January, 2018: We are currently looking into rewriting the core
-to use pure channels, instead of sync.Cond. The other thing that was
-preventing me from calling this at least a "beta" release is that I
-wanted some sort of backpressure solution to match what Erlang is doing.
-However, as of this month, Erlang seems to have removed their implementation
-of backpressure, so as this is an Erlang-porting library, I'm going to
-just say we're not going to implement it. So once we have the channel
-change tested, I'm going to declare this a 0.9.1 release.
-
-PLEASE DO NOT SUBMIT TO REDDIT, HACKER NEWS, ETC... while I'd like to put
-this on there eventually, first I'd like the examples, coverage, working
-clustering, etc. This library is being put up on GitHub even in this state
-because there was some interest in seeing it as-is. I am interested in
-pull-requests, and I am even interested just in emails that say that you
-are interested, as I work out how to spend my copious spare time.
-
-Blog posts will probably appear on this topic on my blog, but there are
-none yet.
-
 This module is fully covered with
 [godoc](http://godoc.org/github.com/thejerf/reign), but test coverage is
-not yet 100%, and there's no example yet (which I intend to get to Real
-Soon Now (TM)). But there is a substantial test suite, which will be kept
-passing, coverage is currently at 84.4% of the code (and if you feel like
-contributing, a good place to start is by simply trying to increase that
-number), and I will be responsive to requests.
+not yet 100%. But it isn't bad.
 
 If this library sounds interesting to you, I would invite you to work with
 me on improving this code rather than starting again on your own. If you
@@ -49,14 +26,30 @@ If you do not need exactly Erlang-style semantics, note there are other
 libraries out there that may be better starting points. But I don't know of
 anything else for Go explicitly written with this goal in mind.
 
-Security
-========
+Getting Started
+===============
 
-One note about reign is that I wanted to take the opportunity to fix the
-security of Erlang clustering by making all clustering run across SSL TCP
-connections. See the README.certificate.md for information about how to
-create the requisite certificates.
+In order to address security concerns, reign uses TLS certificates signed
+by a central CA, and all nodes mutually verify the CA's signature with each
+other. To run reign at all requires creating a CA and certificates for each
+node.
 
-Preliminary benchmarking seems to indicate that the overhead of running
-everything through SSL is negligible once it is negotiated, dominated
-by the other costs of clustering.
+Since it's a bit of a pain to do this in openssl, especially if you don't
+have it installed (Windows), a pure-go program to create some certificates
+is provided:
+
+   # go get github.com/thejerf/reign/cmd/reign_init
+   # reign_init
+   Signing certificate created
+   Constructed certificate for node 1
+   Constructed certificate for node 2
+
+This command created six files, `reign_ca.cert`, `reign_ca.key`,
+`reign_node.1.crt`, `reign_node.1.key`, `reign_node.2.crt`, and
+`reign_node.2.key`.
+
+Reign can use any certificates and certificate authorities that the Go TLS
+library can handle. The certificates created by this script may not
+entirely meet your needs. But they can get you started.
+
+You can now use these certificates to run the sample code.
