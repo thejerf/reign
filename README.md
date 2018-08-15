@@ -18,10 +18,6 @@ This module is fully covered with
 [godoc](http://godoc.org/github.com/thejerf/reign), but test coverage is
 not yet 100%. But it isn't bad.
 
-If this library sounds interesting to you, I would invite you to work with
-me on improving this code rather than starting again on your own. If you
-need help or more documentation, ask and ye shall receive.
-
 If you do not need exactly Erlang-style semantics, note there are other
 libraries out there that may be better starting points. But I don't know of
 anything else for Go explicitly written with this goal in mind.
@@ -36,32 +32,178 @@ node.
 
 Since it's a bit of a pain to do this in openssl, especially if you don't
 have it installed (Windows), a pure-go program to create some certificates
-is provided:
+is provided, as well as a sample program. If you have where ever "go get"
+puts binaries for you in your path, you can run:
 
    # go get github.com/thejerf/reign/cmd/reign_init
+   # go get github.com/thejerf/reign/cmd/reign_sample
    # reign_init
    Signing certificate created
    Constructed certificate for node 1
    Constructed certificate for node 2
 
-This command created six files, `reign_ca.cert`, `reign_ca.key`,
-`reign_node.1.crt`, `reign_node.1.key`, `reign_node.2.crt`, and
-`reign_node.2.key`.
+Note this will plop some certificates into your current directory.
+You may want to start in a temporary directory or something.
+
+Now, in two separate shells, you can run:
+
+    # reign_sample 1
+    # reign_sample 2
+
+This starts up a simple chat server, as documented in the 
+[sample.go](https://github.com/thejerf/reign/blob/master/cmd/reign_sample/sample.go) program. It
+is very, very, very basic; it certainly does not take the time to handle
+terminals nicely. But it demonstrates the point.
 
 Reign can use any certificates and certificate authorities that the Go TLS
 library can handle. The certificates created by this script may not
 entirely meet your needs. But they can get you started.
 
-You can now use these certificates to run the sample code.
+What Is "Erlang-like clustering"?
+=================================
+
+There are some common misconceptions about what "Erlang clustering"
+is. Erlang gives you two things:
+
+ * A PID which can be sent messages from anywhere within a cluster. The
+   message itself may include PIDs, which remain live and useful through
+   the transfer.
+ * Mnesia, a shared dabatase, which can contain PIDs.
+
+The misconception is that Erlang gives you some sort of magic automatic
+clustering. It does not. It is still possible and even a bit easy to
+build applications that are locked to a single OS process. It is your
+job to take the Erlang primitives and build clusterable code.
+
+What Is Reign?
+==============
+
+Reign is a library to allow you to *R*ewrite *E*rlang *I*n *G*o *N*icely... that is,
+by allowing you to do fairly direct ports of your existing Erlang code
+without having to rearchitect it, or give up on clustering support.
+
+This package provides a PID-like data structure and the code to use
+them across a cluster of Go processes, that may live on other machines.
+It is expected that even code porting from Erlang will use other
+database solutions, so there is no Mnesia equivalent, nor any desire
+to implement such a thing.
+
+The goal is NOT a precise translation; for one thing, that's just
+plain impossible as both languages can easily do things the other can
+not. In particular, Erlang's native concurrency is asynchronous
+(that is, an Erlang message can be sent to a process whether or not
+it is receiving), and Go can use user-defined types, both of which
+have major impacts on properly structuring your program. The goal of
+this library is to give you a scaffolding that you can use to rewrite
+your Erlang code without having to entirely restructure it. In some sense,
+ideally over time you should use less and less of this library, however
+the goal is that this is production-quality and you should not be
+forced to do so, especially as there aren't necessarily pure-Go
+implementations of some of this functionality.
+
+If you're using this to start a new Go project, you're probably doing it
+wrong. Probably. Maybe. To be honest while I have not yet pulled the
+trigger, I often find myself eyeing this library for my own projects even
+so.
+
+Mailboxes And Addresses
+=======================
+
+Addresses are the equvialent of Erlang PIDs. Mailboxes are the equivalent
+of the implicit mailbox that an Erlang process has. Since goroutines can
+not carry implicit data, they are explicit in Reign. To avoid confusion
+about this unitary idea in Erlang being split in half in Reign, neither is
+called a "PID", especially since it isn't a "process ID" anyhow.
+
+To get the equivalent of a PID in Erlang, once you have the cluster
+running, use NewMailbox from the connection service to receive a
+paired Address and Mailbox. The Address may be moved across the cluster
+transparently. The Mailbox is bound to the OS process that created it.
+Mailboxes provide both the ability to simply receive the next message
+and to pick a particular message out of the queue, with the same caveats
+in Go as there are in Erlang about the dangers of the queue backing up
+if you do not empty it.
+
+In addition to asynchronous message queues and selective receive, 
+reign implements an equivalent to "linking" in Erlang called
+via NotifyAddressOnTerminate. When used like Erlang linking, this
+allows for some relatively safe RPC calling that will handle the
+mailbox (or the relevant node) being entirely unattached while you
+are trying to communicate with it. Exactly as with Erlang, this still
+isn't a _guarantee_ of delivery, but it helps a lot.
+
+Notes On Translation From Erlang
+================================
+
+Go channels are synchronous. Erlang-style messages are asynchronous. In
+particular, this means that code written like this:
+
+  receive
+      {msg1, Msg} ->
+           {echo, Msg, self()} ! AnotherPID,
+           receive
+               {echoResponse, Msg2} -> ...
+           end
+  end
+
+while idiomatic Erlang, is not generally safe in Go with the standard
+channels if you try to naively replace the receive statements with
+channel operations, because while you are processing a message, you are not able
+to receive any others. Should you end up sending a message that is a
+query to another such process, you'll deadlock on their finishing
+processing their message. The best case is weird latencies, the worst
+case is huge chunks of the system will end up deadlocked.
+
+Of course, the correct Go answer is "don't do that", and when writing code
+from scratch it is a solvable problem. However, it is very easy for
+Erlang code to have accidentally embedded the asynchronous nature of
+messages quite deeply into its architecture, especially given the number
+of ways there are of using "receive" without realizing it. For instance,
+any gen_server that makes a call to another gen_server is exhibiting this
+pattern.
+
+If you do not know for sure that the only possible next message for a
+mailbox is coming from the reply, you need to be sure to use .Receive()
+with a proper selection function in such cases.
+
+Known Issues
+============
+
+In Erlang, a PID secretly contains more information that identifies
+something about when the node that originated the PID starts, or something
+like that, which prevents the "same" PID from being used from two different
+executions. This is easy to fix, but it isn't fixed yet.
+
+I haven't yet benchmarked this very throughly, but generally speaking it
+seems to perform comparably to Erlang at worst, and better in a lot
+of common cases. There are obvious cases that are harder to compare,
+such as the impact of the Go GC on your runtime. This code does
+inevitably result in allocations.
+
+Pre-1.0 Possible Changes
+========================
+
+  * The NodeID type may be unexported. I'm not sure it's ever directly
+    useful to external code.
+  * I'd like to change the logging code to log with JSON objects that
+    happen to render to strings, allowing transparent use with logrus.
 
 Contribution Opportunities
 ==========================
 
-Of course, it's open source. Contribute whatever you like. But I would
+Of course, it's open source. Contribute whatever you like. But in addition
+to resolving the known issues or the pre-1.0 possible changes, I would
 certainly be interested in:
 
-  * Dynamically modifying the node list at run time. Conceptually it's not
+  * More test coverage.
+  * Adding an element to the Address that includes the node's start-up
+    time or some other element that will be different between each run,
+    so an address can't be obtained from one OS process, then that process
+    dies and another starts in its place, and then someone re-uses that
+    ID. Erlang has this.
+  * Dynamically modifying the cluster at run time. Conceptually it's not
     too hard, "just work", but there's some i's to dot and t's to cross.
+    I have some questions around the UI for this.
   * Is it possible to efficiently avoid the need to register message types?
     I'm vaguely nervous about looking at the gob error message and trying
     to infer whether I should call "register", or similar things, but it

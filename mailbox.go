@@ -65,7 +65,7 @@ type message struct {
 // by value.
 //
 // WARNING: It is not safe to use either Address or *Address for equality
-// testing or as a key in maps! Use .GetID() to obtain a AddressID, which
+// testing or as a key in maps! Use .GetID() to obtain a MailboxID, which
 // is. (Both Address and *Address are fine to store as values.)
 type Address struct {
 	mailboxID MailboxID
