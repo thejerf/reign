@@ -189,7 +189,7 @@ the user even has openssl installed (as may not be the case on windows).
 		opts := reigntls.Options{
 			Host:               strconv.Itoa(i),
 			Organization:       *organization,
-			CommonName:         fmt.Sprintf("node_%d", i),
+			CommonName:         fmt.Sprintf("%d", i),
 			SignWithCert:       ca,
 			SignWithPrivateKey: privkey,
 			ValidDuration:      time.Duration(*duration) * time.Hour * 24,
@@ -215,7 +215,7 @@ the user even has openssl installed (as may not be the case on windows).
 			errexit("invalid cert generated: %v", err)
 		}
 		_, err = nodeCert.Verify(x509.VerifyOptions{
-			DNSName: fmt.Sprintf("node_%d", i),
+			DNSName: fmt.Sprintf("%d", i),
 			Roots:   certPool,
 		})
 		if err != nil {

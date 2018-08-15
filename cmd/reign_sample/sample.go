@@ -40,9 +40,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create the cluster from the JSON format.
+	// Create the cluster from the JSON format. If you have modified the
+	// cluster file, you may want to set reign.NullLogger to nil instead,
+	// so you'll get logging to STDERR.
 	connectionService, names, err := reign.CreateFromSpecFile(
-		"sample_config.json", reign.NodeID(nodeInt), nil)
+		"sample_config.json", reign.NodeID(nodeInt), reign.NullLogger)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr,
 			"Couldn't start cluster properly (did you run 'reign_init'?): %v\n",
