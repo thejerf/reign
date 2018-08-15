@@ -19,6 +19,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -70,7 +71,7 @@ var defaultPermittedProtocols = []uint16{
 
 // NodeID is used to identify the current node's ID.
 //
-// This type may be privitized in later versions of reign.
+// This type may be unexported in later versions of reign.
 type NodeID byte
 
 // A NodeDefinition gives information about the node in question.
@@ -82,10 +83,14 @@ type NodeID byte
 // required field.
 //
 // The ListenAddress is what the cluster will actually bind to. If this is
-// the same as the address, you may leave it unspecified.
+// the same as the address, you may leave it unspecified. This is
+// for cases where due to network routing, load balancers, proxies,
+// etc. the address the rest of the cluster uses to connect is not the same
+// as the internal bind address. In simple cases, leave this blank.
 //
 // The LocalAddress is the address to use for the outgoing connections to
-// the cluster. If blank, net.DialTCP will be passed nil for the laddr.
+// the cluster. If blank, net.DialTCP will be passed nil for the laddr. In
+// simple cases, leave this blank.
 type NodeDefinition struct {
 	ID            NodeID `json:"id"`
 	Address       string `json:"address"`
@@ -112,6 +117,8 @@ type ClusterSpec struct {
 	// To specify the path for the node's cert, set either both of
 	// NodeKeyPath and NodeCertPath to load from disk, or
 	// NodeKeyPEM and NodeCertPEM to load the certs from some other source.
+	//
+	// The paths may use %d as a placeholder, to fill in the node ID.
 	NodeKeyPath  string `json:"node_key_path,omitempty"`
 	NodeCertPath string `json:"node_cert_path,omitempty"`
 	NodeKeyPEM   string `json:"node_key_pem,omitempty"`
@@ -358,7 +365,10 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 	var err error
 
 	if spec.NodeKeyPath != "" && spec.NodeCertPath != "" {
-		cert, err = tls.LoadX509KeyPair(spec.NodeCertPath, spec.NodeKeyPath)
+		cert, err = tls.LoadX509KeyPair(
+			resolveNode(spec.NodeCertPath, thisNode),
+			resolveNode(spec.NodeKeyPath, thisNode),
+		)
 		if err != nil {
 			errs = append(errs, "Error from loading the node cert from the disk: "+err.Error())
 		}
@@ -514,4 +524,9 @@ func (c *Cluster) changeConnectionStatus(node NodeID, connected bool) {
 	for _, callback := range c.connectionStatusCallbacks {
 		callback(node, connected)
 	}
+}
+
+func resolveNode(path string, node NodeID) string {
+	nodeStr := strconv.FormatInt(int64(node), 10)
+	return strings.Replace(path, "%d", nodeStr, -1)
 }

@@ -3,6 +3,11 @@
 Executable reign_init can be used to quickly set up a certificate authority
 and usable certificates for reign.
 
+This executable does not do anything necessary to run reign, other than
+provide a convenient method for creating a local CA and the certs to go
+with them. If you already have those, you don't need this. But this
+is convenient to get started with.
+
 These certs should be sufficiently strong that they can even be used on
 the bare internet, though I wouldn't recommend that just on general
 principles. But it is theoretically possible.
@@ -79,6 +84,12 @@ the user even has openssl installed (as may not be the case on windows).
 		os.Exit(1)
 	}
 
+	if *numberOfNodes < 1 || *numberOfNodes > 255 {
+		fmt.Fprintf(os.Stderr, "Illegal number of nodes (must be between"+
+			" 1 and 255): %d\n", *numberOfNodes)
+		os.Exit(1)
+	}
+
 	var ca *x509.Certificate
 	var privkey *ecdsa.PrivateKey
 	if cacertKeyExists {
@@ -138,7 +149,8 @@ the user even has openssl installed (as may not be the case on windows).
 			ValidDuration: time.Duration(*duration) * time.Hour * 24,
 			// for reign, I'm not sure this matters as we don't
 			// particularly check it.
-			Addresses: []string{"127.0.0.1"},
+			Addresses:  []string{"127.0.0.1"},
+			CommonName: "Reign Signing Certificate",
 		}
 		derBytes, privateKey, err := reigntls.CreateCertificate(opts)
 		if err != nil {
@@ -161,6 +173,9 @@ the user even has openssl installed (as may not be the case on windows).
 		fmt.Println("Signing certificate created")
 	}
 
+	certPool := x509.NewCertPool()
+	certPool.AddCert(ca)
+
 	for i := 1; i <= *numberOfNodes; i++ {
 		certfile := filepath.Join(*directory,
 			fmt.Sprintf("reign_node.%d.crt", i))
@@ -174,6 +189,7 @@ the user even has openssl installed (as may not be the case on windows).
 		opts := reigntls.Options{
 			Host:               strconv.Itoa(i),
 			Organization:       *organization,
+			CommonName:         fmt.Sprintf("node_%d", i),
 			SignWithCert:       ca,
 			SignWithPrivateKey: privkey,
 			ValidDuration:      time.Duration(*duration) * time.Hour * 24,
@@ -191,6 +207,19 @@ the user even has openssl installed (as may not be the case on windows).
 		err = outputCert(derBytes, certfile)
 		if err != nil {
 			errexit("Could not write certificate for node %d: %v", i, err)
+		}
+
+		// Validate it is signed and constructed correctly
+		nodeCert, err := x509.ParseCertificate(derBytes)
+		if err != nil {
+			errexit("invalid cert generated: %v", err)
+		}
+		_, err = nodeCert.Verify(x509.VerifyOptions{
+			DNSName: fmt.Sprintf("node_%d", i),
+			Roots:   certPool,
+		})
+		if err != nil {
+			errexit("Unverifiable certificate generated: %v", err)
 		}
 		fmt.Println("Constructed certificate for node", i)
 	}

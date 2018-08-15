@@ -58,6 +58,7 @@ type Options struct {
 	ValidDuration      time.Duration
 	ValidFrom          time.Time
 	Addresses          []string
+	CommonName         string
 }
 
 // CreateCertificate takes the given options and returns the der bytes for
@@ -73,7 +74,7 @@ func CreateCertificate(opt Options) ([]byte, *ecdsa.PrivateKey, error) {
 		return nil, nil, errors.New("absurdly small expiration time")
 	}
 	if opt.ValidFrom.IsZero() {
-		opt.ValidFrom = time.Now()
+		opt.ValidFrom = time.Now().Add(-time.Hour * 24)
 	}
 
 	priv, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
@@ -105,16 +106,13 @@ func CreateCertificate(opt Options) ([]byte, *ecdsa.PrivateKey, error) {
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{opt.Organization},
+			Country:      []string{"GO"},
+			Province:     []string{"reign"},
+			CommonName:   opt.CommonName,
 		},
-		NotBefore: opt.ValidFrom,
-		NotAfter:  notAfter,
-		// FIXME: Do I need DigitalSignature even?
-		KeyUsage: x509.KeyUsageKeyEncipherment |
-			x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		NotBefore:             opt.ValidFrom,
+		NotAfter:              notAfter,
 		BasicConstraintsValid: true,
-		IPAddresses:           ipaddrs,
-		DNSNames:              dnsnames,
 	}
 
 	if opt.IsCA {

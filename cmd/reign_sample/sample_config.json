@@ -1,0 +1,17 @@
+{
+    "nodes": [
+        {
+            "id": 1,
+            "address": "127.0.0.1:20000"
+        },
+        {
+            "id": 2,
+            "address": "127.0.0.1:20001"
+        }
+    ],
+
+    "node_key_path": "reign_node.%d.key",
+    "node_cert_path": "reign_node.%d.crt",
+
+    "cluster_cert_path": "reign_ca.crt"
+}
