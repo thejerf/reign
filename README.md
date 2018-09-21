@@ -22,6 +22,13 @@ If you do not need exactly Erlang-style semantics, note there are other
 libraries out there that may be better starting points. But I don't know of
 anything else for Go explicitly written with this goal in mind.
 
+Current status: This is used in a production system in a 4-node cluster,
+and has been through some trial-by-fire. But as is the nature of this code,
+I'm sure there are more bugs we haven't tickled yet. I think if you want
+to convert an existing Erlang code base to Go, this is likely to be very,
+very helpful to you, but I don't promise it'll do everything you need
+perfectly or that you won't need to work with me to make some things work.
+
 Getting Started
 ===============
 
