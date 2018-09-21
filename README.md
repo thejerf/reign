@@ -258,3 +258,12 @@ certainly be interested in:
     accepted. I would hope it would take the form of implementing certain
     interfaces or something and not deep integration into the data types,
     though.
+
+Release Notes
+=============
+
+reign uses semantic versioning. As reign has not yet hit 1.0, note that
+API changes may still occur without a major version release.
+
+* 0.9.1
+  * Initial release.
