@@ -42,12 +42,12 @@ have it installed (Windows), a pure-go program to create some certificates
 is provided, as well as a sample program. If you have where ever "go get"
 puts binaries for you in your path, you can run:
 
-   # go get github.com/thejerf/reign/cmd/reign_init
-   # go get github.com/thejerf/reign/cmd/reign_sample
-   # reign_init
-   Signing certificate created
-   Constructed certificate for node 1
-   Constructed certificate for node 2
+    # go get github.com/thejerf/reign/cmd/reign_init
+    # go get github.com/thejerf/reign/cmd/reign_sample
+    # reign_init
+    Signing certificate created
+    Constructed certificate for node 1
+    Constructed certificate for node 2
 
 Note this will plop some certificates into your current directory.
 You may want to start in a temporary directory or something.
