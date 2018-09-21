@@ -52,7 +52,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// start the cluster running
+	// start the cluster running. This is designed to integrate with
+	// github.com/thejerf/suture to provide Erlang-like supervision
+	// for the cluster management, but it is not mandatory. Of course, if
+	// you're porting an Erlang code base you'll probably want that too...
 	go connectionService.Serve()
 
 	// Register tells the cluster we're going to send this sort of
