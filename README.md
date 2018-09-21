@@ -51,9 +51,16 @@ Now, in two separate shells, you can run:
     # reign_sample 2
 
 This starts up a simple chat server, as documented in the 
-[sample.go](https://github.com/thejerf/reign/blob/master/cmd/reign_sample/sample.go) program. It
-is very, very, very basic; it certainly does not take the time to handle
-terminals nicely. But it demonstrates the point.
+[sample.go](https://github.com/thejerf/reign/blob/master/cmd/reign_sample/sample.go) program. I
+have chosen to create an example that focuses very specifically on the
+message-passing; consequently it is terribly, terribly ugly on the
+console. I assume you will prefer this to some slick presentation that
+obscures the message-passing under the pile of code it takes to make a
+halfway decent interface of any kind.
+
+To get started, I suggest simply copying and pasting that example into a
+new workspace and start working with the code. That way you start with a
+working system the whole time.
 
 Reign can use any certificates and certificate authorities that the Go TLS
 library can handle. The certificates created by this script may not
@@ -126,7 +133,7 @@ if you do not empty it.
 
 In addition to asynchronous message queues and selective receive, 
 reign implements an equivalent to "linking" in Erlang called
-via NotifyAddressOnTerminate. When used like Erlang linking, this
+via OnCloseNotify. When used like Erlang linking, this
 allows for some relatively safe RPC calling that will handle the
 mailbox (or the relevant node) being entirely unattached while you
 are trying to communicate with it. Exactly as with Erlang, this still

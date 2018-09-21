@@ -62,12 +62,12 @@ func init() {
 	var _ ClusterMessage = (*RegisterRemoteNode)(nil)
 	gob.Register(&rs)
 
-	var rmt RemoteMailboxTerminated
-	var _ ClusterMessage = (*RemoteMailboxTerminated)(nil)
+	var rmt RemoteMailboxClosed
+	var _ ClusterMessage = (*RemoteMailboxClosed)(nil)
 	gob.Register(&rmt)
 
-	var rnnot RemoveNotifyNodeOnTerminate
-	var _ ClusterMessage = (*RemoveNotifyNodeOnTerminate)(nil)
+	var rnnot RemoveNotifyNodeOnClose
+	var _ ClusterMessage = (*RemoveNotifyNodeOnClose)(nil)
 	gob.Register(&rnnot)
 
 	var ur UnnotifyRemote
@@ -198,21 +198,21 @@ type RegisterRemoteNode struct {
 
 func (rs *RegisterRemoteNode) isClusterMessage() {}
 
-// RemoteMailboxTerminated is an internal message, public only for gob's
+// RemoteMailboxClosed is an internal message, public only for gob's
 // sake.
-type RemoteMailboxTerminated struct {
+type RemoteMailboxClosed struct {
 	IntMailboxID
 }
 
-func (rmt *RemoteMailboxTerminated) isClusterMessage() {}
+func (rmt *RemoteMailboxClosed) isClusterMessage() {}
 
-// RemoveNotifyNodeOnTerminate is an internal message, public only for
+// RemoveNotifyNodeOnClose is an internal message, public only for
 // gob's sake.
-type RemoveNotifyNodeOnTerminate struct {
+type RemoveNotifyNodeOnClose struct {
 	IntMailboxID
 }
 
-func (rnnot *RemoveNotifyNodeOnTerminate) isClusterMessage() {}
+func (rnnot *RemoveNotifyNodeOnClose) isClusterMessage() {}
 
 // UnnotifyRemote is an internal message, public only for gob's sake.
 type UnnotifyRemote struct {

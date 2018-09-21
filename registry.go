@@ -244,7 +244,7 @@ func newRegistry(cs *connectionServer, node NodeID, log ClusterLogger) *registry
 
 func (r *registry) Terminate() {
 	r.Tracef("Terminating registry on node %d", r.thisNode)
-	r.Mailbox.Terminate()
+	r.Mailbox.Close()
 }
 
 // AddNodeRegistry acceptes a node ID and an Address, and adds the Address to the
@@ -283,7 +283,7 @@ func (r *registry) String() string {
 
 func (r *registry) Serve() {
 	for {
-		message := r.ReceiveNext()
+		message := r.Receive()
 		switch msg := message.(type) {
 		case internal.RegisterName: // Received locally
 			r.register(msg.Name, MailboxID(msg.MailboxID))
@@ -324,7 +324,7 @@ func (r *registry) Serve() {
 		case stopRegistry:
 			return
 
-		case MailboxTerminated:
+		case MailboxClosed:
 			// (Adam): The only scenario I've seen thus far where we receive a
 			// MailboxTerminated is when the registry's mailbox is terminated and
 			// the UnregisterMailbox message is sent to itself.  It may be more
@@ -612,7 +612,7 @@ func (r *registry) registerAll(entries registryEntries) {
 				// terminated but never properly unregistered.  The MultipleClaim message will
 				// never reach its destination and the caller of Register() will never know
 				// about the multiple claim.
-				if err == ErrMailboxTerminated {
+				if err == ErrMailboxClosed {
 					r.Tracef("Unregistering mailbox %x due to Mailbox Terminated error", mailboxID)
 					r.Unregister(e.name, addr)
 					continue

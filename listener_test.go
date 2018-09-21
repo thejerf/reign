@@ -170,7 +170,7 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 		if err != nil {
 			b.Error(err)
 		}
-		_ = ntb.node1mailbox1.ReceiveNext()
+		_ = ntb.node1mailbox1.Receive()
 	}
 }
 
@@ -186,7 +186,7 @@ func BenchmarkRegisterUnregisterMailbox(b *testing.B) {
 		_ = ntb.node1connectionServer.registry.Register("test", a)
 		ntb.node1connectionServer.registry.Sync()
 
-		m.Terminate()
+		m.Close()
 		ntb.node1connectionServer.registry.Sync()
 	}
 }

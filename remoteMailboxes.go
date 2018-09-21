@@ -162,7 +162,7 @@ func (rm *remoteMailboxes) Serve() {
 					mailboxID:        localID,
 					connectionServer: rm.connectionServer,
 				}
-				_ = addr.Send(MailboxTerminated(remoteID))
+				_ = addr.Send(MailboxClosed(remoteID))
 			}
 		}
 		rm.linksToRemote = make(map[MailboxID]map[MailboxID]voidtype)
@@ -186,7 +186,7 @@ func (rm *remoteMailboxes) Serve() {
 			}
 		}
 
-		message = rm.outgoingMailbox.ReceiveNext()
+		message = rm.outgoingMailbox.Receive()
 
 		if rm.examineMessages != nil {
 			if !rm.examineMessages(message) {
@@ -207,7 +207,7 @@ func (rm *remoteMailboxes) Serve() {
 				connectionServer: rm.connectionServer,
 			}
 			err := addr.Send(msg.Message)
-			if err == ErrMailboxTerminated {
+			if err == ErrMailboxClosed {
 				// Unregister the mailbox again since it appears one or more nodes
 				// did not receive the message either through a network error or
 				// straight up negligence.
@@ -216,7 +216,7 @@ func (rm *remoteMailboxes) Serve() {
 				// sort of retry mechanism when sending out UnregisterName messages
 				// over the socket.  Really, this whole struct could use the ability
 				// to resend any message and be a bit more fault tolerant.
-				rm.Tracef("Received MailboxTerminated error for mailbox ID %x; unregistering", addr.GetID())
+				rm.Tracef("Received MailboxClosed error for mailbox ID %x; unregistering", addr.GetID())
 				rm.connectionServer.registry.UnregisterMailbox(rm.NodeID, addr.GetID())
 			}
 
@@ -250,7 +250,7 @@ func (rm *remoteMailboxes) Serve() {
 						mailboxID:        localID,
 						connectionServer: rm.connectionServer,
 					}
-					_ = addr.Send(MailboxTerminated(remoteID))
+					_ = addr.Send(MailboxClosed(remoteID))
 					// FIXME: Really? Panic?
 					panic(err)
 				}
@@ -274,13 +274,13 @@ func (rm *remoteMailboxes) Serve() {
 				// the remote node send does all the error handling I need
 				// here.
 				_ = rm.send(
-					&internal.RemoveNotifyNodeOnTerminate{
+					&internal.RemoveNotifyNodeOnClose{
 						IntMailboxID: internal.IntMailboxID(remoteID),
 					},
 				)
 			}
 
-		case *internal.RemoteMailboxTerminated:
+		case *internal.RemoteMailboxClosed:
 			// A remote mailbox has been terminated that we indicated
 			// interest in.
 			remoteID := MailboxID(msg.IntMailboxID)
@@ -294,7 +294,7 @@ func (rm *remoteMailboxes) Serve() {
 					mailboxID:        subscribed,
 					connectionServer: rm.connectionServer,
 				}
-				_ = addr.Send(MailboxTerminated(remoteID))
+				_ = addr.Send(MailboxClosed(remoteID))
 			}
 
 			delete(rm.linksToRemote, remoteID)
@@ -307,23 +307,23 @@ func (rm *remoteMailboxes) Serve() {
 				mailboxID:        localID,
 				connectionServer: rm.connectionServer,
 			}
-			addr.NotifyAddressOnTerminate(rm.Address)
+			addr.OnCloseNotify(rm.Address)
 
-		case *internal.RemoveNotifyNodeOnTerminate:
+		case *internal.RemoveNotifyNodeOnClose:
 			localID := MailboxID(msg.IntMailboxID)
 			addr := Address{
 				mailboxID:        localID,
 				connectionServer: rm.connectionServer,
 			}
-			addr.RemoveNotifyAddress(rm.Address)
+			addr.RemoveNotify(rm.Address)
 
 		// Note this is a local mailbox.
-		case MailboxTerminated:
+		case MailboxClosed:
 			id := MailboxID(msg)
 			// if we are receiving this, apparently the other side wants to
 			// hear about it
 			_ = rm.send(
-				&internal.RemoteMailboxTerminated{
+				&internal.RemoteMailboxClosed{
 					IntMailboxID: internal.IntMailboxID(id),
 				},
 			)

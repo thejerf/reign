@@ -39,9 +39,9 @@ var ErrIllegalAddressFormat = errors.New("illegally-formatted address")
 
 var errIllegalNilSlice = errors.New("can't unmarshal nil slice into an address")
 
-// ErrMailboxTerminated is returned when the target mailbox has (already) been
-// terminated.
-var ErrMailboxTerminated = errors.New("mailbox has been terminated")
+// ErrMailboxClosed is returned when the target mailbox has (already) been
+// closed.
+var ErrMailboxClosed = errors.New("mailbox has been closed")
 
 // ErrNotLocalMailbox is returned when a remote mailbox's MailboxID is passed
 // into a function that only works on local mailboxes.
@@ -50,7 +50,7 @@ var ErrNotLocalMailbox = errors.New("function required a local mailbox ID but th
 type address interface {
 	send(interface{}) error
 
-	notifyAddressOnTerminate(*Address)
+	onCloseNotify(*Address)
 	removeNotifyAddress(*Address)
 	canBeGloballyRegistered() bool
 	canBeGloballyUnregistered() bool
@@ -135,12 +135,12 @@ func (a *Address) getAddress() address {
 
 		// since the above if clause forces addressByID down the
 		// same if branch in its implementation, the only possible
-		// error is ErrMailboxTerminated. While this is in some
+		// error is ErrMailboxClosed. While this is in some
 		// sense an error for the user, as far as marshaling is
 		// concerned, this is success, because it's perfectly legal to
 		// unmarshal an address corresponding to something that has
-		// since terminated, just as it's perfectly legal to hold on to
-		// a reference to a mailbox that has terminated. We do however
+		// since closed, just as it's perfectly legal to hold on to
+		// a reference to a mailbox that has closed. We do however
 		// short-circuit everything else about the mailbox by returning
 		// this "noMailbox" shim.
 		a.mailbox = &noMailbox{a.mailboxID}
@@ -156,7 +156,7 @@ func (a *Address) getAddress() address {
 	return a.mailbox
 }
 
-// Send something to the target mailbox.
+// Send something to the mailbox corresponding to this address.
 //
 // All concrete types that you wish to send across the cluster must
 // have .Register called on them. See the documentation on gob.Register
@@ -165,11 +165,11 @@ func (a *Address) getAddress() address {
 // of this package may require you to fix that.)
 //
 // The error is primarily for internal purposes. If the mailbox is
-// local, and has been terminated, ErrMailboxTerminated will be
+// local, and has been closed, ErrMailboxClosed will be
 // returned.
 //
 // An error guarantees failure, but lack of error does not guarantee
-// success! Arguably, "ErrMailboxTerminated" should be seen as a purely
+// success! Arguably, "ErrMailboxClosed" should be seen as a purely
 // internal detail, and just like in Erlang, if you want a guarantee
 // you must implement an acknowledgement. However, just like in
 // Erlang, we leak this internal detail a bit. I don't know if
@@ -179,8 +179,8 @@ func (a *Address) Send(m interface{}) error {
 	return a.getAddress().send(m)
 }
 
-// NotifyAddressOnTerminate requests that the target address receive a
-// termination notice when the target address is terminated.
+// OnCloseNotify requests that the target address receive a
+// close notice when the target address is closed.
 //
 // This is like linking in Erlang, and is intended to provide the
 // same guarantees.
@@ -190,23 +190,23 @@ func (a *Address) Send(m interface{}) error {
 // From that point of view, note the caller is the *argument*, not
 // the object. Calls look like:
 //
-//     otherAddress.NotifyAddressOnTerminate(myAddress)
+//     otherAddress.OnCloseNotify(myAddress)
 //
-// which translates in English as "Other address, please let me
-// know when you are terminated."
+// Read that as something like, "You over there, upon your closing notify
+// (me)."
 //
 // Calling this more than once with the same address may or may not
 // cause multiple notifications to occur.
-func (a *Address) NotifyAddressOnTerminate(addr *Address) {
-	a.getAddress().notifyAddressOnTerminate(addr)
+func (a *Address) OnCloseNotify(addr *Address) {
+	a.getAddress().onCloseNotify(addr)
 }
 
-// RemoveNotifyAddress will remove the notification request from the
+// RemoveNotify will remove the notification request from the
 // Address you call this on.
 //
-// This does not guarantee that you will not receive a termination
-// notification from the Address, due to race conditions.
-func (a *Address) RemoveNotifyAddress(addr *Address) {
+// This does not guarantee that you will not receive a closed
+// notification from the Address, due to (inherent) race conditions.
+func (a *Address) RemoveNotify(addr *Address) {
 	a.getAddress().removeNotifyAddress(addr)
 }
 
@@ -416,11 +416,11 @@ func (mID MailboxID) mailboxOnlyID() uint64 {
 	return uint64(mID >> 8)
 }
 
-// MailboxTerminated is sent to Addresses that request notification
-// of when a Mailbox is being terminated, with NotifyAddressOnTerminate.
-// If you request termination notification of multiple mailboxes, this can
+// MailboxClosed is sent to Addresses that request notification
+// of when a Mailbox is being closed, with OnCloseNotify.
+// If you request close notification of multiple mailboxes, this can
 // be converted to an MailboxID which can be used to distinguish them.
-type MailboxTerminated MailboxID
+type MailboxClosed MailboxID
 
 type mailboxes struct {
 	nextMailboxID MailboxID
@@ -495,7 +495,7 @@ func (m *mailboxes) mailboxByID(mID MailboxID) (*Mailbox, error) {
 	m.RUnlock()
 
 	if !exists {
-		return nil, ErrMailboxTerminated
+		return nil, ErrMailboxClosed
 	}
 
 	return mbox, nil
@@ -523,15 +523,15 @@ type Mailbox struct {
 	// a notification has been processed
 	parent               *mailboxes
 	broadcastOnAddNotify bool
-	terminated           bool
+	closed               bool
 }
 
 func (m *Mailbox) send(msg interface{}) error {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
-	if m.terminated {
-		return ErrMailboxTerminated
+	if m.closed {
+		return ErrMailboxClosed
 	}
 
 	m.messages = append(m.messages, message{msg})
@@ -553,12 +553,12 @@ func (m *Mailbox) getMailboxID() MailboxID {
 	return m.id
 }
 
-func (m *Mailbox) notifyAddressOnTerminate(target *Address) {
+func (m *Mailbox) onCloseNotify(target *Address) {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
-	if m.terminated {
-		_ = target.Send(MailboxTerminated(m.id))
+	if m.closed {
+		_ = target.Send(MailboxClosed(m.id))
 
 		return
 	}
@@ -605,36 +605,36 @@ func (m *Mailbox) removeNotifyAddress(target *Address) {
 
 // MessageCount returns the number of messages in the mailbox.
 //
-// 0 is always returned if the mailbox is terminated.
+// 0 is always returned if the mailbox is closed.
 func (m *Mailbox) MessageCount() int {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
-	if !m.terminated {
+	if !m.closed {
 		return len(m.messages)
 	}
 
 	return 0
 }
 
-// ReceiveNext will receive the next message sent to this mailbox.
+// Receive will receive the next message sent to this mailbox.
 // It blocks until the next message comes in, which may be forever.
-// If the mailbox is terminated, it will receive a MailboxTerminated reply.
+// If the mailbox is closed, it will receive a MailboxClosed reply.
 //
 // If you've got multiple receivers on a single mailbox, be sure to check
-// for MailboxTerminated.
-func (m *Mailbox) ReceiveNext() interface{} {
+// for MailboxClosed.
+func (m *Mailbox) Receive() interface{} {
 	// FIXME: Verify three listeners on one shared mailbox all get
-	// terminated properly.
+	// closed properly.
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
-	for len(m.messages) == 0 && !m.terminated {
+	for len(m.messages) == 0 && !m.closed {
 		m.cond.Wait()
 	}
 
-	if m.terminated {
-		return MailboxTerminated(m.id)
+	if m.closed {
+		return MailboxClosed(m.id)
 	}
 
 	msg := m.messages[0]
@@ -649,19 +649,19 @@ func (m *Mailbox) ReceiveNext() interface{} {
 	return msg.msg
 }
 
-// ReceiveNextAsync will return immediately with (obj, true) if, and only if,
+// ReceiveAsync will return immediately with (obj, true) if, and only if,
 // there was a message in the inbox, or else (nil, false). Works the same way
-// as ReceiveNext, otherwise
-func (m *Mailbox) ReceiveNextAsync() (interface{}, bool) {
+// as ReceiveNext, otherwise.
+func (m *Mailbox) ReceiveAsync() (interface{}, bool) {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
-	if len(m.messages) == 0 && !m.terminated {
+	if len(m.messages) == 0 && !m.closed {
 		return nil, false
 	}
 
-	if m.terminated {
-		return MailboxTerminated(m.id), true
+	if m.closed {
+		return MailboxClosed(m.id), true
 	}
 
 	msg := m.messages[0]
@@ -675,14 +675,14 @@ func (m *Mailbox) ReceiveNextAsync() (interface{}, bool) {
 	return msg.msg, true
 }
 
-// ReceiveNextTimeout works like ReceiveNextAsync, but it will wait until either a message
-// is received or the timeout expires, whichever is sooner
-func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (interface{}, bool) {
+// ReceiveTimeout works like ReceiveNextAsync, but it will wait until
+// either a message is received or the timeout expires, whichever is sooner
+func (m *Mailbox) ReceiveTimeout(timeout time.Duration) (interface{}, bool) {
 	startTime := time.Now()
 	endTime := startTime.Add(timeout)
 
 	for !time.Now().After(endTime) {
-		msg, ok := m.ReceiveNextAsync()
+		msg, ok := m.ReceiveAsync()
 		if ok {
 			return msg, ok
 		}
@@ -691,13 +691,13 @@ func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (interface{}, bool) 
 	return nil, false
 }
 
-// Receive will receive the next message sent to this mailbox that matches
+// ReceiveMatch will receive the next message sent to this mailbox that matches
 // according to the passed-in function.
 //
-// Receive assumes that it is the only function running against the
-// Mailbox. If you Receive from multiple goroutines, or Receive in one
+// ReceiveMatch assumes that it is the only function running against the
+// Mailbox. If you ReceiveMatch from multiple goroutines, or ReceiveMatch in one
 // and ReceiveNext in another, you *will* miss messages in the routine
-// calling Receive.
+// calling ReceiveMatch.
 //
 // I recommend that your matcher function be:
 //
@@ -707,14 +707,14 @@ func (m *Mailbox) ReceiveNextTimeout(timeout time.Duration) (interface{}, bool) 
 //      return ok
 //  }
 //
-// If the mailbox gets terminated, this will return a MailboxTerminated,
+// If the mailbox gets closed, this will return a MailboxClosed,
 // regardless of the behavior of the matcher.
-func (m *Mailbox) Receive(matcher func(interface{}) bool) interface{} {
+func (m *Mailbox) ReceiveMatch(matcher func(interface{}) bool) interface{} {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
-	if m.terminated {
-		return MailboxTerminated(m.id)
+	if m.closed {
+		return MailboxClosed(m.id)
 	}
 
 	// see if there are any messages that match
@@ -732,12 +732,12 @@ func (m *Mailbox) Receive(matcher func(interface{}) bool) interface{} {
 	for {
 		lastIdx := len(m.messages)
 
-		for len(m.messages) == lastIdx && !m.terminated {
+		for len(m.messages) == lastIdx && !m.closed {
 			m.cond.Wait()
 		}
 
-		if m.terminated {
-			return MailboxTerminated(m.id)
+		if m.closed {
+			return MailboxClosed(m.id)
 		}
 
 		for ; lastIdx < len(m.messages); lastIdx++ {
@@ -750,21 +750,19 @@ func (m *Mailbox) Receive(matcher func(interface{}) bool) interface{} {
 	}
 }
 
-// Terminate shuts down a given mailbox. Once terminated, a mailbox
+// Close shuts down a given mailbox. Once closed, a mailbox
 // will reject messages without even looking at them, and can no longer
 // have any Receive used on them.
 //
-// Further, it will notify any registered Addresses that it has been terminated.
+// Further, it will notify any registered Addresses that it has been closed.
 //
 // This facility is used analogously to Erlang's "link" functionality.
 // Of course in Go you can't be notified when a goroutine terminates, but
-// if you defer mailbox.Terminate() in the proper place for your mailbox
+// if you defer mailbox.Close() in the proper place for your mailbox
 // user, you can get most of the way there.
 //
-// FIXME: What do we do with this upon network partition? What does Erlang do?
-//
-// It is not an error to Terminate an already-Terminated mailbox.
-func (m *Mailbox) Terminate() {
+// It is not an error to Close an already-Closed mailbox.
+func (m *Mailbox) Close() {
 	// I think doing this before locking our own lock is correct; we are
 	// already uninterested in any future operations, and double-deleting
 	// out of this dict is OK.
@@ -773,21 +771,21 @@ func (m *Mailbox) Terminate() {
 	m.cond.L.Lock()
 	defer m.cond.L.Unlock()
 
-	// this is not redundant; m.terminated is part of what we have to lock
-	if m.terminated {
+	// this is not redundant; m.closed is part of what we have to lock
+	if m.closed {
 		return
 	}
 
-	m.terminated = true
+	m.closed = true
 
-	terminating := MailboxTerminated(m.id)
+	closing := MailboxClosed(m.id)
 	cs := m.parent.connectionServer
 	for mailboxID := range m.notificationAddresses {
 		addr := Address{
 			mailboxID:        mailboxID,
 			connectionServer: cs,
 		}
-		_ = addr.Send(terminating)
+		_ = addr.Send(closing)
 	}
 
 	// chuck out what garbage we can
@@ -811,11 +809,11 @@ type noMailbox struct {
 }
 
 func (nm noMailbox) send(interface{}) error {
-	return ErrMailboxTerminated
+	return ErrMailboxClosed
 }
 
-func (nm noMailbox) notifyAddressOnTerminate(target *Address) {
-	_ = target.Send(MailboxTerminated(nm.MailboxID))
+func (nm noMailbox) onCloseNotify(target *Address) {
+	_ = target.Send(MailboxClosed(nm.MailboxID))
 }
 
 func (nm noMailbox) removeNotifyAddress(target *Address) {}
@@ -854,7 +852,7 @@ func (bra boundRemoteAddress) send(message interface{}) error {
 	)
 }
 
-func (bra boundRemoteAddress) notifyAddressOnTerminate(addr *Address) {
+func (bra boundRemoteAddress) onCloseNotify(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
 	_ = bra.remoteMailboxes.Send(

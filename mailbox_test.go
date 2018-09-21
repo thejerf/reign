@@ -29,7 +29,7 @@ func (f FakeMailbox) canBeGloballyUnregistered() bool {
 	return false
 }
 
-func (f FakeMailbox) notifyAddressOnTerminate(_ *Address) {}
+func (f FakeMailbox) onCloseNotify(_ *Address) {}
 
 func (f FakeMailbox) removeNotifyAddress(_ *Address) {}
 
@@ -46,14 +46,14 @@ func TestMailboxReceiveNext(t *testing.T) {
 	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
-	defer m.Terminate()
+	defer m.Close()
 
 	msgs := make(chan interface{})
 
 	done := make(chan bool)
 	go func() {
 		for {
-			msg := m.ReceiveNext()
+			msg := m.Receive()
 			if _, ok := msg.(Stop); ok {
 				done <- true
 				return
@@ -107,7 +107,7 @@ func TestMailboxReceiveNextAsync(t *testing.T) {
 	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
-	defer m.Terminate()
+	defer m.Close()
 
 	msgs := []string{"1", "2", "3"}
 	for _, msg := range msgs {
@@ -117,7 +117,7 @@ func TestMailboxReceiveNextAsync(t *testing.T) {
 	}
 
 	for _, msg := range msgs {
-		recv, ok := m.ReceiveNextAsync()
+		recv, ok := m.ReceiveAsync()
 		if !ok {
 			t.Fatalf("Did not receive a message. Expected '%s'", msg)
 		}
@@ -125,7 +125,7 @@ func TestMailboxReceiveNextAsync(t *testing.T) {
 			t.Fatalf("Received incorrect message. Expected '%s', got '%s'", msg, recv)
 		}
 	}
-	_, ok := m.ReceiveNextAsync()
+	_, ok := m.ReceiveAsync()
 	if ok {
 		t.Fatal("ReceiveNextAsync() on an empty mailbox should have failed")
 	}
@@ -136,7 +136,7 @@ func TestMailboxReceiveNextTimeout(t *testing.T) {
 	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
-	defer m.Terminate()
+	defer m.Close()
 
 	msgs := []string{"1", "2", "3"}
 	for _, msg := range msgs {
@@ -146,7 +146,7 @@ func TestMailboxReceiveNextTimeout(t *testing.T) {
 	}
 
 	for _, msg := range msgs {
-		recv, ok := m.ReceiveNextTimeout(timeout)
+		recv, ok := m.ReceiveTimeout(timeout)
 		if !ok {
 			t.Fatalf("Did not receive a message. Expected '%s'", msg)
 		}
@@ -157,7 +157,7 @@ func TestMailboxReceiveNextTimeout(t *testing.T) {
 
 	// Now test that we actually wait for at least as long as the timeout specifies
 	startTime := time.Now()
-	_, ok := m.ReceiveNextTimeout(timeout)
+	_, ok := m.ReceiveTimeout(timeout)
 	endTime := time.Now()
 	expectedEndTime := startTime.Add(timeout)
 	if ok {
@@ -173,7 +173,7 @@ func TestMailboxReceive(t *testing.T) {
 	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
-	defer m.Terminate()
+	defer m.Close()
 
 	msgs := make(chan interface{})
 	matches := make(chan func(interface{}) bool)
@@ -201,7 +201,7 @@ func TestMailboxReceive(t *testing.T) {
 	go func() {
 		for {
 			matcher := <-matches
-			msg := m.Receive(matcher)
+			msg := m.ReceiveMatch(matcher)
 			if _, ok := msg.(Stop); ok {
 				done <- true
 				return
@@ -311,7 +311,7 @@ func TestSimpleMailboxTerminate(t *testing.T) {
 	addr, mailbox := connections.NewMailbox()
 
 	// Make certain the mailbox is empty.
-	m, ok := mailbox.ReceiveNextAsync()
+	m, ok := mailbox.ReceiveAsync()
 	if ok {
 		t.Fatalf("Received an unexpected message: %#v", m)
 	}
@@ -325,9 +325,9 @@ func TestSimpleMailboxTerminate(t *testing.T) {
 	// The mailbox currently has one message in it.  However, we should
 	// only receive the MailboxTerminated message after we terminate the
 	// mailbox, *not* the "Hello" message.
-	mailbox.Terminate()
-	m, ok = mailbox.ReceiveNextAsync()
-	if _, terminated := m.(MailboxTerminated); !ok || !terminated {
+	mailbox.Close()
+	m, ok = mailbox.ReceiveAsync()
+	if _, terminated := m.(MailboxClosed); !ok || !terminated {
 		t.Fatalf("Expected a MailboxTerminated message: %#v", m)
 	}
 }
@@ -338,47 +338,47 @@ func TestTerminate(t *testing.T) {
 
 	addr1, mailbox1 := connections.NewMailbox()
 	addr2, mailbox2 := connections.NewMailbox()
-	defer mailbox2.Terminate()
+	defer mailbox2.Close()
 
-	addr1.NotifyAddressOnTerminate(addr2)
+	addr1.OnCloseNotify(addr2)
 
-	mailbox1.Terminate()
+	mailbox1.Close()
 	// double-termination is legal
-	mailbox1.Terminate()
+	mailbox1.Close()
 
-	msg, ok := mailbox2.ReceiveNextAsync()
+	msg, ok := mailbox2.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received. Expected termination.")
 	}
-	if MailboxID(msg.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(msg.(MailboxClosed)) != addr1.mailboxID {
 		t.Fatal("Terminate did not send the right termination message")
 	}
 
-	if err := addr1.Send("message"); err != ErrMailboxTerminated {
+	if err := addr1.Send("message"); err != ErrMailboxClosed {
 		t.Fatal("Sending to a closed mailbox does not yield the terminated error")
 	}
 
-	addr1.NotifyAddressOnTerminate(addr2)
-	msg, ok = mailbox2.ReceiveNextAsync()
+	addr1.OnCloseNotify(addr2)
+	msg, ok = mailbox2.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received. Expected termination.")
 	}
-	if MailboxID(msg.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(msg.(MailboxClosed)) != addr1.mailboxID {
 		t.Fatal("Terminate did not send the right termination message for terminated mailbox")
 	}
 
-	terminatedResult, ok := mailbox1.ReceiveNextAsync()
+	terminatedResult, ok := mailbox1.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received. Expected termination.")
 	}
-	if MailboxID(terminatedResult.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(terminatedResult.(MailboxClosed)) != addr1.mailboxID {
 		t.Fatal("ReceiveNextAsync  from a terminated mailbox does not return MailboxTerminated properly")
 	}
 
 	addr1S, mailbox1S := connections.NewMailbox()
-	mailbox1S.Terminate()
-	terminatedResult = mailbox1S.Receive(anything)
-	if MailboxID(terminatedResult.(MailboxTerminated)) != addr1S.mailboxID {
+	mailbox1S.Close()
+	terminatedResult = mailbox1S.ReceiveMatch(anything)
+	if MailboxID(terminatedResult.(MailboxClosed)) != addr1S.mailboxID {
 		t.Fatal("Receive from a terminated mailbox does not return MailboxTerminated properly")
 	}
 }
@@ -411,7 +411,7 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 			mailbox1.cond.Wait()
 		}
 		mailbox1.cond.L.Unlock()
-		mailbox1.Terminate()
+		mailbox1.Close()
 	}()
 
 	// And here, we run a Receive call that won't match the first message
@@ -420,7 +420,7 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		result = mailbox1.Receive(wantHello)
+		result = mailbox1.ReceiveMatch(wantHello)
 		done <- struct{}{}
 	}()
 
@@ -432,7 +432,7 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 
 	// The end result of all this setup is that we should be able to show
 	// that the .Receive call ended up with a MailboxTerminated as its result
-	if MailboxID(result.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(result.(MailboxClosed)) != addr1.mailboxID {
 		t.Fatal("Terminating the Receive on Terminate doesn't work")
 	}
 }
@@ -446,7 +446,7 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 	// Similar to the previous test, except simpler
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		mailbox1.Terminate()
+		mailbox1.Close()
 	}()
 
 	// And here, we run a Receive call that won't match the first message
@@ -455,7 +455,7 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		result = mailbox1.ReceiveNext()
+		result = mailbox1.Receive()
 		done <- struct{}{}
 	}()
 
@@ -463,7 +463,7 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 
 	// The end result of all this setup is that we should be able to show
 	// that the .Receive call ended up with a MailboxTerminated as its result
-	if MailboxID(result.(MailboxTerminated)) != addr1.mailboxID {
+	if MailboxID(result.(MailboxClosed)) != addr1.mailboxID {
 		t.Fatal("Terminating the ReceiveNext on Terminate doesn't work")
 	}
 }
@@ -473,7 +473,7 @@ func TestGetAddress(t *testing.T) {
 	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
-	defer m.Terminate()
+	defer m.Close()
 
 	a2 := Address{mailboxID: a.mailboxID}
 	a2.getAddress()
@@ -499,16 +499,16 @@ func TestRemoveOfNotifications(t *testing.T) {
 	defer cs.Terminate()
 
 	addr, mailbox1 := connections.NewMailbox()
-	defer mailbox1.Terminate()
+	defer mailbox1.Close()
 
 	addr2, mailbox2 := connections.NewMailbox()
-	defer mailbox2.Terminate()
+	defer mailbox2.Close()
 
 	// no crashing
-	addr.RemoveNotifyAddress(addr2)
+	addr.RemoveNotify(addr2)
 
-	addr.NotifyAddressOnTerminate(addr2)
-	addr.RemoveNotifyAddress(addr2)
+	addr.OnCloseNotify(addr2)
+	addr.RemoveNotify(addr2)
 	if len(addr.getAddress().(*Mailbox).notificationAddresses) != 0 {
 		t.Fatal("Removing addresses doesn't work as expected")
 	}
@@ -519,13 +519,13 @@ func TestSendByID(t *testing.T) {
 	defer cs.Terminate()
 
 	_, mailbox := connections.NewMailbox()
-	defer mailbox.Terminate()
+	defer mailbox.Close()
 
 	// Verify that creating a new address with the same ID works
 	addr := Address{mailboxID: mailbox.id}
 	err := addr.Send("Hello")
 
-	msg, ok := mailbox.ReceiveNextAsync()
+	msg, ok := mailbox.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received")
 	}
@@ -537,7 +537,7 @@ func TestSendByID(t *testing.T) {
 
 	addr = Address{mailboxID: MailboxID(256) + MailboxID(connections.ThisNode.ID)}
 	err = addr.Send("Hello")
-	if err != ErrMailboxTerminated {
+	if err != ErrMailboxClosed {
 		t.Fatal("sendByID happily sent to a terminated mailbox")
 	}
 }
@@ -603,7 +603,7 @@ func TestMarshaling(t *testing.T) {
 	defer cs.Terminate()
 
 	a, m := connections.NewMailbox()
-	defer m.Terminate()
+	defer m.Close()
 
 	a.mailbox = FakeMailbox{}
 	_, err := a.MarshalBinary()
@@ -722,13 +722,13 @@ func TestCoverNoMailbox(t *testing.T) {
 	mID := MailboxID(257)
 	nm := noMailbox{mID}
 
-	if nm.send(939) != ErrMailboxTerminated {
+	if nm.send(939) != ErrMailboxClosed {
 		t.Fatal("Can send to the no mailbox somehow")
 	}
 	if nm.MailboxID != mID {
 		t.Fatal("mailboxID incorrectly implemented for noMailbox")
 	}
-	nm.notifyAddressOnTerminate(&Address{mailboxID: mID, mailbox: nm})
+	nm.onCloseNotify(&Address{mailboxID: mID, mailbox: nm})
 	nm.removeNotifyAddress(&Address{mailboxID: mID, mailbox: nm})
 
 	// FIXME: Test marshal/unmarshal
@@ -780,10 +780,10 @@ func TestCoverAddressMarshaling(t *testing.T) {
 	}
 
 	a, m1 := connections.NewMailbox()
-	defer m1.Terminate()
+	defer m1.Close()
 
 	a2, m2 := connections.NewMailbox()
-	defer m2.Terminate()
+	defer m2.Close()
 
 	a2.UnmarshalFromID(a.mailboxID)
 	a2.connectionServer = connections
@@ -792,7 +792,7 @@ func TestCoverAddressMarshaling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg, ok := m1.ReceiveNextAsync()
+	msg, ok := m1.ReceiveAsync()
 	if !ok {
 		t.Fatal("Mailbox received nothing")
 	}

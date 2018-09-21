@@ -91,7 +91,7 @@ func main() {
 	go func() {
 		for {
 			// As the receiver, we use the mailbox:
-			msg := mailbox.ReceiveNext()
+			msg := mailbox.Receive()
 
 			// If your mailbox receives multiple types, you'd normally have
 			// to do a type switch here, but in this example, there is only

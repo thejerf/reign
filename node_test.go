@@ -52,7 +52,7 @@ func TestMinimalTestBed(t *testing.T) {
 	}
 
 	// Receive the message in mailbox1 on node 1.
-	msg, ok := ntb.node1mailbox1.ReceiveNextTimeout(timeout)
+	msg, ok := ntb.node1mailbox1.ReceiveTimeout(timeout)
 	if !ok {
 		t.Fatalf("Did not receive %q message", m)
 	}
@@ -64,7 +64,7 @@ func TestMinimalTestBed(t *testing.T) {
 	if err := ntb.fromNode2toNode1mailbox2.Send(m); err != nil {
 		t.Fatal(err)
 	}
-	msg, ok = ntb.node2mailbox1.ReceiveNextTimeout(timeout)
+	msg, ok = ntb.node2mailbox1.ReceiveTimeout(timeout)
 	if !ok {
 		t.Fatalf("Did not receive %q message", m)
 	}
@@ -76,7 +76,7 @@ func TestMinimalTestBed(t *testing.T) {
 	if err := ntb.fromNode2toNode1mailbox2.Send(m); err != nil {
 		t.Fatal(err)
 	}
-	msg, ok = ntb.node2mailbox1.ReceiveNextTimeout(timeout)
+	msg, ok = ntb.node2mailbox1.ReceiveTimeout(timeout)
 	if !ok {
 		t.Fatalf("Did not receive %q message", m)
 	}
@@ -88,7 +88,7 @@ func TestMinimalTestBed(t *testing.T) {
 	if err := ntb.fromNode1toNode2mailbox2.Send(m); err != nil {
 		t.Fatal(err)
 	}
-	msg, ok = ntb.node2mailbox2.ReceiveNextTimeout(timeout)
+	msg, ok = ntb.node2mailbox2.ReceiveTimeout(timeout)
 	if !ok {
 		t.Fatalf("Did not receive %q message", m)
 	}
@@ -107,7 +107,7 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 	if err := ntb.fromNode2toNode1mailbox2.Send(ntb.node1address1); err != nil {
 		t.Fatal(err)
 	}
-	sa, ok := ntb.node2mailbox1.ReceiveNextTimeout(timeout)
+	sa, ok := ntb.node2mailbox1.ReceiveTimeout(timeout)
 	if !ok {
 		t.Fatal("No message received")
 	}
@@ -122,7 +122,7 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 	if err := sentAddr.Send("ack"); err != nil {
 		t.Fatal(err)
 	}
-	received, ok := ntb.node1mailbox1.ReceiveNextTimeout(timeout)
+	received, ok := ntb.node1mailbox1.ReceiveTimeout(timeout)
 	if !ok {
 		t.Fatal("No message received")
 	}
@@ -173,9 +173,9 @@ func TestHappyPathRemoteLink(t *testing.T) {
 
 	// from the perspective of node 1, "Mr. Mailbox 1_2 on node 2,
 	// please tell me when you terminate."
-	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address1)
+	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address1)
 	// yes, we run it twice; this covers the duplicate code path
-	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address1)
+	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address1)
 
 	// "Let's wait on our testing until 1_2 has successfully recorded
 	// that 1_1 wants notification on termination.", which, due to
@@ -185,12 +185,12 @@ func TestHappyPathRemoteLink(t *testing.T) {
 
 	// now that we know the listens are all set up "correctly", let's see
 	// if we get the terminate.
-	ntb.node2mailbox1.Terminate()
-	termNotice, ok := ntb.node1mailbox1.ReceiveNextTimeout(timeout)
+	ntb.node2mailbox1.Close()
+	termNotice, ok := ntb.node1mailbox1.ReceiveTimeout(timeout)
 	if !ok {
 		t.Fatal("No message received")
 	}
-	if MailboxID(termNotice.(MailboxTerminated)) != ntb.node2mailbox1.id {
+	if MailboxID(termNotice.(MailboxClosed)) != ntb.node2mailbox1.id {
 		t.Fatal("Received a termination notice for the wrong mailbox")
 	}
 }
@@ -218,21 +218,21 @@ func TestHappyPathPartialUnnotify(t *testing.T) {
 	}
 
 	// Add notifications on 1_1 to both mailboxes on node 1
-	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address1)
-	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address2)
+	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address1)
+	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address2)
 	ntb.node2address1.getAddress().(*Mailbox).blockUntilNotifyStatus(ntb.node2remoteMailboxes.Address, true)
 
 	// remove it from one node
-	ntb.fromNode2toNode1mailbox2.RemoveNotifyAddress(ntb.node1address1)
+	ntb.fromNode2toNode1mailbox2.RemoveNotify(ntb.node1address1)
 
 	<-gotUnnotifyRemote
 	// now, ensure that we still get notified on the remaining address
-	ntb.node2mailbox1.Terminate()
-	termNotice, ok := ntb.node2mailbox1.ReceiveNextAsync()
+	ntb.node2mailbox1.Close()
+	termNotice, ok := ntb.node2mailbox1.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received")
 	}
-	if MailboxID(termNotice.(MailboxTerminated)) != ntb.node2mailbox1.id {
+	if MailboxID(termNotice.(MailboxClosed)) != ntb.node2mailbox1.id {
 		t.Fatal("Did not receive the right termination notice:", termNotice)
 	}
 }
@@ -243,14 +243,14 @@ func TestHappyPathFullUnnotify(t *testing.T) {
 	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
-	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address1)
-	ntb.fromNode2toNode1mailbox2.NotifyAddressOnTerminate(ntb.node1address2)
+	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address1)
+	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address2)
 
 	// now, verify that the other side does indeed get a full Remove
 	// command when we remove the other notify address
 	gotRemoveNotifyNode := make(chan struct{})
 	err := ntb.node2remoteMailboxes.Send(newDoneProcessing{func(x interface{}) bool {
-		_, isRNNOT := x.(*internal.RemoveNotifyNodeOnTerminate)
+		_, isRNNOT := x.(*internal.RemoveNotifyNodeOnClose)
 		if isRNNOT {
 			gotRemoveNotifyNode <- void
 		}
@@ -259,8 +259,8 @@ func TestHappyPathFullUnnotify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ntb.fromNode2toNode1mailbox2.RemoveNotifyAddress(ntb.node1address1)
-	ntb.fromNode2toNode1mailbox2.RemoveNotifyAddress(ntb.node1address2)
+	ntb.fromNode2toNode1mailbox2.RemoveNotify(ntb.node1address1)
+	ntb.fromNode2toNode1mailbox2.RemoveNotify(ntb.node1address2)
 
 	// if we got this far, then the unnotify got processed.
 	<-gotRemoveNotifyNode

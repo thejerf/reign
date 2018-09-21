@@ -54,10 +54,10 @@ func (ntb *NetworkTestBed) terminateServers() {
 }
 
 func (ntb *NetworkTestBed) terminateMailboxes() {
-	ntb.node1mailbox1.Terminate()
-	ntb.node1mailbox2.Terminate()
-	ntb.node2mailbox1.Terminate()
-	ntb.node2mailbox2.Terminate()
+	ntb.node1mailbox1.Close()
+	ntb.node1mailbox2.Close()
+	ntb.node2mailbox1.Close()
+	ntb.node2mailbox2.Close()
 	ntb.node1connectionServer.Terminate()
 	ntb.node2connectionServer.Terminate()
 }
