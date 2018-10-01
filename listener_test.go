@@ -1,6 +1,7 @@
 package reign
 
 import (
+	"context"
 	"net"
 	"sync"
 	"testing"
@@ -36,7 +37,7 @@ func TestMyStringCover(t *testing.T) {
 }
 
 func TestNodeListenerErrors(t *testing.T) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, testLogger{t})
 	defer ntb.terminate()
 
 	nl := &nodeListener{
@@ -85,12 +86,12 @@ func TestNodeListenerErrors(t *testing.T) {
 	}()
 	nl.waitForListen()
 	_ = nl.String() // should not block
-	nl.listener.Close()
+	_ = nl.listener.Close()
 	<-terminated
 }
 
 func TestListenerSSLHandshakeFailures(t *testing.T) {
-	ntb := unstartedTestbed(nil)
+	ntb := unstartedTestbed(nil, testLogger{t})
 	// we never start the servers, so we only need this
 	defer ntb.terminateMailboxes()
 
@@ -99,7 +100,7 @@ func TestListenerSSLHandshakeFailures(t *testing.T) {
 }
 
 func TestListenerClusterHandshakeFailures(t *testing.T) {
-	ntb := unstartedTestbed(nil)
+	ntb := unstartedTestbed(nil, testLogger{t})
 	defer ntb.terminateMailboxes()
 
 	ntb.node2connectionServer.listener.failOnClusterHandshake = true
@@ -107,7 +108,7 @@ func TestListenerClusterHandshakeFailures(t *testing.T) {
 }
 
 func TestNodeSSLHandshakeFailures(t *testing.T) {
-	ntb := unstartedTestbed(nil)
+	ntb := unstartedTestbed(nil, testLogger{t})
 	defer ntb.terminateMailboxes()
 
 	ntb.node1connectionServer.nodeConnectors[2].failOnSSLHandshake = true
@@ -115,7 +116,7 @@ func TestNodeSSLHandshakeFailures(t *testing.T) {
 }
 
 func TestNodeClusterHandshakeFailure(t *testing.T) {
-	ntb := unstartedTestbed(nil)
+	ntb := unstartedTestbed(nil, testLogger{t})
 	defer ntb.terminateMailboxes()
 
 	ntb.node1connectionServer.nodeConnectors[2].failOnClusterHandshake = true
@@ -159,9 +160,10 @@ func TestCoverStopNodeListener(t *testing.T) {
 }
 
 func BenchmarkMinimalMessageSend(b *testing.B) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, nil)
 	defer ntb.terminate()
 
+	ctx := context.Background()
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -170,12 +172,15 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 		if err != nil {
 			b.Error(err)
 		}
-		_ = ntb.node1mailbox1.ReceiveNext()
+		_, err = ntb.node1mailbox1.Receive(ctx)
+		if err != nil {
+			b.Error(err)
+		}
 	}
 }
 
 func BenchmarkRegisterUnregisterMailbox(b *testing.B) {
-	ntb := testbed(nil)
+	ntb := testbed(nil, nil)
 	defer ntb.terminate()
 
 	b.ReportAllocs()
@@ -183,10 +188,10 @@ func BenchmarkRegisterUnregisterMailbox(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		a, m := ntb.node1connectionServer.NewMailbox()
-		ntb.node1connectionServer.registry.Register("test", a)
+		_ = ntb.node1connectionServer.registry.Register("test", a)
 		ntb.node1connectionServer.registry.Sync()
 
-		m.Terminate()
+		m.Close()
 		ntb.node1connectionServer.registry.Sync()
 	}
 }

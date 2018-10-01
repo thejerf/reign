@@ -95,9 +95,10 @@ type connectionServer struct {
 
 // NewMailbox creates a new tied pair of Address and Mailbox.
 //
-// A Mailbox MUST have .Terminate() called on it when you are done with
-// it. Otherwise termination notifications will not properly fire and
-// resources will leak.
+// A Mailbox MUST have .Close() called on it when you are done with
+// it. Otherwise close notifications will not properly fire and
+// resources will leak. Normal usage of this function will frequently be
+// paired with defer mailbox.Close().
 //
 // It is not safe to copy a Mailbox by value; client code should never have
 // Mailbox appearing as a non-pointer-type in its code. It is a code smell
@@ -134,7 +135,9 @@ func (cs *connectionServer) Terminate() {
 	setConnections(nil)
 }
 
-func (cs *connectionServer) send(mID MailboxID, msg interface{}) (err error) {
+func (cs *connectionServer) send(mID MailboxID, msg interface{}) error {
+	var err error
+
 	if mID.NodeID() == cs.ThisNode.ID {
 		err = cs.mailboxes.sendByID(mID, msg)
 	} else {
@@ -143,10 +146,10 @@ func (cs *connectionServer) send(mID MailboxID, msg interface{}) (err error) {
 				Target:  internal.IntMailboxID(mID),
 				Message: msg,
 			},
-			"remote mailbox message",
 		)
 	}
-	return
+
+	return err
 }
 
 func newConnections(cluster *Cluster, myNodeID NodeID) *connectionServer {

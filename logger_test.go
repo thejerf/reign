@@ -7,8 +7,8 @@ import (
 
 type nullWriter struct{}
 
-func (nw nullWriter) Write(p []byte) (n int, err error) {
-	return
+func (nw nullWriter) Write(p []byte) (int, error) {
+	return 0, nil
 }
 
 func TestWrapLoggerCoverage(t *testing.T) {

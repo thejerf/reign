@@ -29,7 +29,7 @@ func TestLookup(t *testing.T) {
 	}
 
 	addr1, mbx1 := cs.NewMailbox()
-	defer mbx1.Terminate()
+	defer mbx1.Close()
 
 	if err := r.Register(name, addr1); err != nil {
 		t.Fatal(err)
@@ -39,16 +39,19 @@ func TestLookup(t *testing.T) {
 
 	// Lookup an identifier with a single Address.
 	a = r.Lookup(name)
-	a.Send(void)
-	if _, ok := mbx1.ReceiveNextAsync(); !ok {
+	err := a.Send(void)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mbx1.ReceiveAsync(); !ok {
 		t.Fatal("No message received")
 	}
 
 	addr2, mbx2 := cs.NewMailbox()
-	defer mbx2.Terminate()
+	defer mbx2.Close()
 
 	addr3, mbx3 := cs.NewMailbox()
-	defer mbx3.Terminate()
+	defer mbx3.Close()
 
 	if err := r.Register(name, addr2); err != nil {
 		t.Fatal(err)
@@ -92,11 +95,13 @@ func TestConnectionStatus(t *testing.T) {
 	defer r.Stop()
 
 	addr, mbx := cs.NewMailbox()
-	defer mbx.Terminate()
+	defer mbx.Close()
 
 	// This shouldn't do anything, since connected == true
 	s := connectionStatus{cs.nodeID, true}
-	r.send(s)
+	if err := r.send(s); err != nil {
+		t.Fatal(err)
+	}
 
 	// First register a mailbox
 	name := "684910"
@@ -106,7 +111,9 @@ func TestConnectionStatus(t *testing.T) {
 
 	// This should unregister everything on this node.
 	s.connected = false
-	r.send(s)
+	if err := r.send(s); err != nil {
+		t.Fatal(err)
+	}
 	r.Sync()
 
 	// Now make sure the mailbox was unregistered by re-registering with the same info (if unregister
@@ -115,10 +122,12 @@ func TestConnectionStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Sync()
-	addr.Send(void)
+	if err := addr.Send(void); err != nil {
+		t.Fatal(err)
+	}
 
 	// mbx should not have received a MultipleClaim
-	v, ok := mbx.ReceiveNextAsync()
+	v, ok := mbx.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received")
 	}
@@ -132,51 +141,13 @@ func TestNoRegistryServe(t *testing.T) {
 	defer cs.Terminate()
 
 	addr, mbx := cs.NewMailbox()
-	defer mbx.Terminate()
+	defer mbx.Close()
 
-	addr.Send(void)
-	if _, ok := mbx.ReceiveNextAsync(); !ok {
+	if err := addr.Send(void); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mbx.ReceiveAsync(); !ok {
 		t.Fatal("No message received")
-	}
-}
-
-func TestUnregisterOnTerminate(t *testing.T) {
-	cs, r := noClustering(NullLogger)
-	defer cs.Terminate()
-
-	go func() { r.Serve() }()
-	defer r.Stop()
-
-	addr, mbx := cs.NewMailbox()
-
-	names := []string{"blah", "blech", "blorg"}
-
-	for _, name := range names {
-		if err := r.Register(name, addr); err != nil {
-			t.Fatal(err)
-		}
-	}
-	r.Sync()
-
-	// Make sure Lookup works
-	for _, name := range names {
-		addr := r.Lookup(name)
-		if addr == nil {
-			t.Fatalf("Lookup failed on registered name '%s'", name)
-		}
-	}
-
-	// Terminate() should call r.UnregisterMailbox and unregistered all the names that
-	// belong to mbx
-	mbx.Terminate()
-	r.Sync()
-
-	// Now make sure that all the names have been unregistered
-	for _, name := range names {
-		addr := r.Lookup(name)
-		if addr != nil {
-			t.Fatalf("Terminate() did not unregister name '%s'", name)
-		}
 	}
 }
 
@@ -188,30 +159,38 @@ func TestInternalRegisterName(t *testing.T) {
 	defer r.Stop()
 
 	addr1, mbx1 := cs.NewMailbox()
-	defer mbx1.Terminate()
+	defer mbx1.Close()
 
 	addr2, mbx2 := cs.NewMailbox()
-	defer mbx2.Terminate()
+	defer mbx2.Close()
 
 	name := "blah"
-	r.Register(name, addr1)
-	r.Register(name, addr2)
+	if err := r.Register(name, addr1); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(name, addr2); err != nil {
+		t.Fatal(err)
+	}
 	// 255 is nonexistent node, but we're only looking at the messages sent to mbx1. This
 	// should trigger a MultiplClaim broadcast to mbx2 (invalid) and mbx1 (valid)
 	r.Sync()
 
-	addr1.Send(void)
-	addr2.Send(void)
+	if err := addr1.Send(void); err != nil {
+		t.Fatal(err)
+	}
+	if err := addr2.Send(void); err != nil {
+		t.Fatal(err)
+	}
 
 	// Make sure we received the MultipleClaim
-	mc, ok := mbx1.ReceiveNextAsync()
+	mc, ok := mbx1.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received")
 	}
 	if _, ok = mc.(MultipleClaim); !ok {
 		t.Fatal("Register is supposed to trigger a register")
 	}
-	mc, ok = mbx2.ReceiveNextAsync()
+	mc, ok = mbx2.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received")
 	}
@@ -231,7 +210,7 @@ func TestInternalUnregisterName(t *testing.T) {
 	fakeName := "blorg"
 
 	addr, mbx := cs.NewMailbox()
-	defer mbx.Terminate()
+	defer mbx.Close()
 
 	if err := r.Register(name, addr); err != nil {
 		t.Fatal("Initial Register should have succeeded")
@@ -242,10 +221,12 @@ func TestInternalUnregisterName(t *testing.T) {
 	// If this Unregsister doesn't work, the second Register will trigger a MultipleClaim broadcast
 	r.Unregister(name, addr)
 	r.Sync()
-	addr.Send(void)
+	if err := addr.Send(void); err != nil {
+		t.Fatal(err)
+	}
 
 	// mbx should not have received a MultipleClaim
-	v, ok := mbx.ReceiveNextAsync()
+	v, ok := mbx.ReceiveAsync()
 	if !ok {
 		t.Fatal("No message received")
 	}
@@ -262,34 +243,36 @@ func TestInternalAllNodeClaims(t *testing.T) {
 	cs, r := noClustering(NullLogger)
 	defer cs.Terminate()
 
-	go func() { r.Serve() }()
+	go r.Serve()
 	defer r.Stop()
 
 	// Make a bunch of names for the same mailbox and register them with AllNodeClaims
 	names := []string{"foo", "bar", "baz"}
 
 	addr1, mbx1 := cs.NewMailbox()
-	defer mbx1.Terminate()
+	defer mbx1.Close()
 
-	mid := internal.IntMailboxID(mbx1.id)
+	mID := internal.IntMailboxID(mbx1.id)
 	registrationMap := make(map[string]map[internal.IntMailboxID]struct{})
 	for _, name := range names {
 		registrationMap[name] = map[internal.IntMailboxID]struct{}{
-			mid: struct{}{},
+			mID: struct{}{},
 		}
 	}
-	anc := internal.AllNodeClaims{
+	anc := &internal.AllNodeClaims{
 		Node:   internal.IntNodeID(cs.nodeID),
 		Claims: registrationMap,
 	}
-	r.send(anc)
+	if err := r.send(anc); err != nil {
+		t.Fatal(err)
+	}
 
 	r.Sync()
 
 	// Now register all of the previous names again, but to a different mailbox.
 	// This should trigger a MultipleClaim broadcast
 	addr2, mbx2 := cs.NewMailbox()
-	defer mbx2.Terminate()
+	defer mbx2.Close()
 
 	for _, name := range names {
 		if err := r.Register(name, addr2); err != nil {
@@ -300,16 +283,20 @@ func TestInternalAllNodeClaims(t *testing.T) {
 
 	// Make sure we don't block
 	for range names {
-		addr1.Send(void)
+		if err := addr1.Send(void); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for range names {
-		addr2.Send(void)
+		if err := addr2.Send(void); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Verify that we got MultipleClaims on both mailboxen
 	for _, mbx := range []*Mailbox{mbx1, mbx2} {
 		for _, name := range names {
-			mc, ok := mbx.ReceiveNextAsync()
+			mc, ok := mbx.ReceiveAsync()
 			if !ok {
 				t.Fatalf("No message received for name %q", name)
 			}
@@ -332,27 +319,31 @@ func TestMultipleClaimCount(t *testing.T) {
 	defer r.Stop()
 
 	addr1, mbx1 := cs.NewMailbox()
-	defer mbx1.Terminate()
+	defer mbx1.Close()
 
 	addr2, mbx2 := cs.NewMailbox()
-	defer mbx2.Terminate()
+	defer mbx2.Close()
 
 	addr3, mbx3 := cs.NewMailbox()
-	defer mbx3.Terminate()
+	defer mbx3.Close()
 
 	addr4, mbx4 := cs.NewMailbox()
-	defer mbx4.Terminate()
+	defer mbx4.Close()
 
 	addr5, mbx5 := cs.NewMailbox()
-	defer mbx5.Terminate()
+	defer mbx5.Close()
 
 	if actual := r.MultipleClaimCount(); actual != 0 {
 		t.Fatalf("expected 0 multiple claims; actual = %d", actual)
 	}
 
 	name1 := "foo"
-	r.Register(name1, addr1)
-	r.Register(name1, addr2)
+	if err := r.Register(name1, addr1); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(name1, addr2); err != nil {
+		t.Fatal(err)
+	}
 	r.Sync()
 
 	// There is a multiple claim for name1.
@@ -361,9 +352,15 @@ func TestMultipleClaimCount(t *testing.T) {
 	}
 
 	name2 := "bar"
-	r.Register(name2, addr3)
-	r.Register(name2, addr4)
-	r.Register(name2, addr5)
+	if err := r.Register(name2, addr3); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(name2, addr4); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(name2, addr5); err != nil {
+		t.Fatal(err)
+	}
 	r.Sync()
 
 	// There are now two multiple claims, one for name1 and one for name2.
