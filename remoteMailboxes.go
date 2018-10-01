@@ -1,6 +1,7 @@
 package reign
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -178,7 +179,12 @@ func (rm *remoteMailboxes) Serve() {
 		}
 	}()
 
-	var message interface{}
+	var (
+		ctx     = context.Background()
+		err     error
+		message interface{}
+	)
+
 	for {
 		if rm.doneProcessing != nil {
 			if !rm.doneProcessing(message) {
@@ -186,7 +192,12 @@ func (rm *remoteMailboxes) Serve() {
 			}
 		}
 
-		message = rm.outgoingMailbox.Receive()
+		message, err = rm.outgoingMailbox.Receive(ctx)
+		if err == ErrMailboxClosed {
+			rm.Trace(err)
+
+			return
+		}
 
 		if rm.examineMessages != nil {
 			if !rm.examineMessages(message) {
@@ -206,8 +217,8 @@ func (rm *remoteMailboxes) Serve() {
 				mailboxID:        MailboxID(msg.Target),
 				connectionServer: rm.connectionServer,
 			}
-			err := addr.Send(msg.Message)
-			if err == ErrMailboxClosed {
+			sErr := addr.Send(msg.Message)
+			if sErr == ErrMailboxClosed {
 				// Unregister the mailbox again since it appears one or more nodes
 				// did not receive the message either through a network error or
 				// straight up negligence.
@@ -244,15 +255,15 @@ func (rm *remoteMailboxes) Serve() {
 				// Since this is the first link to this particular
 				// remote mailbox we are recording, we need to send along
 				// the registration message
-				err := rm.send(&internal.NotifyNodeOnTerminate{IntMailboxID: internal.IntMailboxID(remoteID)})
-				if err != nil {
+				sErr := rm.send(&internal.NotifyNodeOnTerminate{IntMailboxID: internal.IntMailboxID(remoteID)})
+				if sErr != nil {
 					addr := Address{
 						mailboxID:        localID,
 						connectionServer: rm.connectionServer,
 					}
 					_ = addr.Send(MailboxClosed(remoteID))
 					// FIXME: Really? Panic?
-					panic(err)
+					panic(sErr)
 				}
 			}
 

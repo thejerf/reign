@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// timeout is the duration used for ReceiveNextTimeout() calls.
+// timeout is the duration used for Receive() calls.
 var timeout = time.Second
 
 // This file contains code that supports the tests, including:

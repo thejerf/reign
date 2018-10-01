@@ -1,6 +1,7 @@
 package reign
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -31,7 +32,7 @@ func (f FakeMailbox) canBeGloballyUnregistered() bool {
 
 func (f FakeMailbox) onCloseNotify(_ *Address) {}
 
-func (f FakeMailbox) removeNotifyAddress(_ *Address) {}
+func (f FakeMailbox) removeNotify(_ *Address) {}
 
 var anything = func(i interface{}) bool {
 	return true
@@ -50,12 +51,16 @@ func TestMailboxReceiveNext(t *testing.T) {
 
 	msgs := make(chan interface{})
 
-	done := make(chan bool)
+	done := make(chan struct{})
 	go func() {
+		ctx := context.Background()
 		for {
-			msg := m.Receive()
+			msg, err := m.Receive(ctx)
+			if err != nil {
+				panic(err)
+			}
 			if _, ok := msg.(Stop); ok {
-				done <- true
+				done <- struct{}{}
 				return
 			}
 			msgs <- msg
@@ -146,24 +151,30 @@ func TestMailboxReceiveNextTimeout(t *testing.T) {
 	}
 
 	for _, msg := range msgs {
-		recv, ok := m.ReceiveTimeout(timeout)
-		if !ok {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		recv, err := m.Receive(ctx)
+		cancel()
+
+		switch {
+		case err != nil:
 			t.Fatalf("Did not receive a message. Expected '%s'", msg)
-		}
-		if recv != msg {
+		case recv != msg:
 			t.Fatalf("Received incorrect message. Expected '%s', got '%s'", msg, recv)
 		}
 	}
 
 	// Now test that we actually wait for at least as long as the timeout specifies
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	startTime := time.Now()
-	_, ok := m.ReceiveTimeout(timeout)
+	_, err := m.Receive(ctx)
 	endTime := time.Now()
+	cancel()
 	expectedEndTime := startTime.Add(timeout)
-	if ok {
-		t.Fatal("ReceiveNextAsync() on an empty mailbox should have failed")
-	}
-	if expectedEndTime.After(endTime) {
+
+	switch {
+	case err == nil:
+		t.Fatal("ReceiveNext() on an empty mailbox should have failed due to time out")
+	case expectedEndTime.After(endTime):
 		t.Fatal("Timed out too soon")
 	}
 }
@@ -177,35 +188,31 @@ func TestMailboxReceive(t *testing.T) {
 
 	msgs := make(chan interface{})
 	matches := make(chan func(interface{}) bool)
-	done := make(chan bool)
+	done := make(chan Stop)
+	matchC := func(i interface{}) bool {
+		_, ok := i.(C)
 
-	// this channel and the next few funcs allow us to control the
-	// syncronization enough to verify some properties of the Receive
-	// function, by ensuring the controlling goroutine (this func) can be
-	// sure we've progressed into the part of the Receive function that we
-	// expect. Note this is for sync only, the value is NOT the value of
-	// the match itself.
-	matching := make(chan bool)
-
-	matchC := func(i interface{}) (ok bool) {
-		_, ok = i.(C)
-		matching <- true
-		return
+		return ok
 	}
-	matchStop := func(i interface{}) (ok bool) {
-		_, ok = i.(Stop)
-		matching <- true
-		return
+	matchStop := func(i interface{}) bool {
+		_, ok := i.(Stop)
+
+		return ok
 	}
 
 	go func() {
+		ctx := context.Background()
 		for {
 			matcher := <-matches
-			msg := m.ReceiveMatch(matcher)
+			msg, err := m.ReceiveMatch(ctx, matcher)
+			if err != nil {
+				panic(err)
+			}
 			if _, ok := msg.(Stop); ok {
-				done <- true
+				close(done)
 				return
 			}
+
 			msgs <- msg
 		}
 	}()
@@ -228,79 +235,55 @@ func TestMailboxReceive(t *testing.T) {
 
 	// contains: [b, c, d]
 	matches <- matchC
-	// must permit one use of the match function per searched item
-	<-matching
-	// should find C on this match
-	<-matching
 	msg := <-msgs
 
 	if _, ok := msg.(C); !ok {
 		t.Fatal("Did not retrieve the correct message")
 	}
 
-	if !reflect.DeepEqual(m.messages, []message{{b}, {d}}) {
-		t.Fatal("Did not properly fix up the message queue")
+	// b is currently held in the nextMessage chan, so it isn't in the messages slice.
+	if expected := []message{{d}}; !reflect.DeepEqual(m.messages, expected) {
+		t.Fatalf("Did not properly fix up the message queue:\n%#v\n%#v", m.messages, expected)
 	}
 
 	// now test the case where we don't have the message we want
-	waitingDone := make(chan bool)
-	fatal := make(chan struct{})
+	waitingDone := make(chan Stop)
+	fatal := make(chan Stop)
 	go func() {
 		matches <- matchC
 		msg := <-msgs
 		if _, ok := msg.(C); !ok {
 			close(fatal)
 		}
-		waitingDone <- true
+		close(waitingDone)
 	}()
 
-	match := func() {
-		select {
-		case <-matching:
-		case <-fatal:
-			t.Fatal("Did not retrieve the correct message")
-		}
-	}
-
-	// will run two matches against what is already there (b, d), then wait
-	match()
-	match()
-	// Receive() will be at m.cond.Wait() at this point, allowing us to lock
-	// the mutex and send d.
 	if err := a.Send(d); err != nil {
 		t.Fatal(err)
 	}
-	// Pick up reading from where we left off.  We won't match on d.
-	match()
+
 	if err := a.Send(c); err != nil {
 		t.Fatal(err)
 	}
-	// We will match on c we just sent.
-	match()
-	<-waitingDone
 
-	if !reflect.DeepEqual(m.messages, []message{{b}, {d}, {d}}) {
+	// We will match on c we just sent.
+	select {
+	case <-waitingDone:
+	case <-fatal:
+		t.Fatal("Did not received the expected message")
+	}
+
+	// b is still in the nextMessage chan.
+	if !reflect.DeepEqual(m.messages, []message{{d}, {d}}) {
 		t.Fatal("Did not properly fix up the message queue")
 	}
 
-	// Send the Stop message before sending matchStop.  Otherwise, we deadlock with Receive()
-	// holding the mutex, Send() attempting to acquire the mutex, and matchStop blocking on
-	// its write to the matching channel.
-	//
-	// Alternatively, we could send matchStop, read from matching 3 times to progress Receive()
-	// to m.cond.Wait().  This would release the mutex so Send() can acquire it and deliver the
-	// Stop message.  The subsequent read from matching will successfully match on the Stop message.
 	if err := a.Send(Stop{}); err != nil {
 		t.Fatal(err)
 	}
 	matches <- matchStop
-	// match against the three messages in the queue
-	<-matching
-	<-matching
-	<-matching
-	// then successfully match the Stop we put on...
-	<-matching
-	// at which point we're done.
+
+	// Matching on stop will close the done channel.
 	<-done
 }
 
@@ -348,38 +331,44 @@ func TestTerminate(t *testing.T) {
 
 	msg, ok := mailbox2.ReceiveAsync()
 	if !ok {
-		t.Fatal("No message received. Expected termination.")
+		t.Fatal("No message received. Expected closed.")
 	}
 	if MailboxID(msg.(MailboxClosed)) != addr1.mailboxID {
-		t.Fatal("Terminate did not send the right termination message")
+		t.Fatal("Close did not send the right closed message")
 	}
 
-	if err := addr1.Send("message"); err != ErrMailboxClosed {
-		t.Fatal("Sending to a closed mailbox does not yield the terminated error")
+	err := addr1.Send("message")
+	if err != ErrMailboxClosed {
+		t.Fatal("Sending to a closed mailbox does not yield the closed error")
 	}
 
 	addr1.OnCloseNotify(addr2)
 	msg, ok = mailbox2.ReceiveAsync()
 	if !ok {
-		t.Fatal("No message received. Expected termination.")
+		t.Fatal("No message received. Expected closed.")
 	}
 	if MailboxID(msg.(MailboxClosed)) != addr1.mailboxID {
-		t.Fatal("Terminate did not send the right termination message for terminated mailbox")
+		t.Fatal("Close did not send the right close message for closed mailbox")
 	}
 
 	terminatedResult, ok := mailbox1.ReceiveAsync()
 	if !ok {
-		t.Fatal("No message received. Expected termination.")
+		t.Fatal("No message received. Expected closed.")
 	}
 	if MailboxID(terminatedResult.(MailboxClosed)) != addr1.mailboxID {
-		t.Fatal("ReceiveNextAsync  from a terminated mailbox does not return MailboxTerminated properly")
+		t.Fatal("ReceiveNextAsync from a closed mailbox does not return MailboxClosed properly")
 	}
 
 	addr1S, mailbox1S := connections.NewMailbox()
 	mailbox1S.Close()
-	terminatedResult = mailbox1S.ReceiveMatch(anything)
+
+	ctx := context.Background()
+	terminatedResult, err = mailbox1S.ReceiveMatch(ctx, anything)
+	if err != ErrMailboxClosed {
+		t.Fatal("Receive from a closed mailbox does not return ErrMailboxClosed error")
+	}
 	if MailboxID(terminatedResult.(MailboxClosed)) != addr1S.mailboxID {
-		t.Fatal("Receive from a terminated mailbox does not return MailboxTerminated properly")
+		t.Fatal("Receive from a closed mailbox does not return correct MailboxClosed message")
 	}
 }
 
@@ -396,6 +385,7 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 	}
 
 	addr1, mailbox1 := connections.NewMailbox()
+	done := make(chan Stop)
 
 	// This goroutine uses private variables watches to see when the first
 	// message has been sent. The Receive call is not looking for this message,
@@ -403,37 +393,48 @@ func TestAsyncTerminateOnReceive(t *testing.T) {
 	// Receive call is in the for loop part of the call.
 	// Once that happens, this will Terminate the mailbox.
 	go func() {
-		// FIXME: klunky, not sure how to get this to be guaranteed that the Receive
-		// is in the for loop without klunking up the implementation...
-		time.Sleep(5 * time.Millisecond)
-		mailbox1.cond.L.Lock()
-		for len(mailbox1.messages) != 1 {
-			mailbox1.cond.Wait()
+		select {
+		case <-done:
+			return
+		case prevMsg, ok := <-mailbox1.nextMessage:
+			if !ok {
+				return
+			}
+
+			mailbox1.nextMessage <- prevMsg
 		}
-		mailbox1.cond.L.Unlock()
 		mailbox1.Close()
 	}()
 
 	// And here, we run a Receive call that won't match the first message
 	// we send it, and assert that it gets the correct MailboxTerminated.
-	var result interface{}
-	done := make(chan struct{})
+	var (
+		err    error
+		result interface{}
+	)
 
 	go func() {
-		result = mailbox1.ReceiveMatch(wantHello)
-		done <- struct{}{}
+		var ctx = context.Background()
+		result, err = mailbox1.ReceiveMatch(ctx, wantHello)
+		if err != nil && err != ErrMailboxClosed {
+			panic(err)
+		}
+		close(done)
 	}()
 
-	if err := addr1.Send(1); err != nil {
-		t.Fatal(err)
+	if sErr := addr1.Send(1); sErr != nil {
+		t.Fatal(sErr)
 	}
 
 	<-done
 
 	// The end result of all this setup is that we should be able to show
 	// that the .Receive call ended up with a MailboxTerminated as its result
-	if MailboxID(result.(MailboxClosed)) != addr1.mailboxID {
-		t.Fatal("Terminating the Receive on Terminate doesn't work")
+	switch {
+	case err != ErrMailboxClosed:
+		t.Fatalf("Closing the mailbox during Receive() doesn't return an ErrMailboxClosed error: %#v", err)
+	case MailboxID(result.(MailboxClosed)) != addr1.mailboxID:
+		t.Fatal("Closing the mailbox during Receive() doesn't return an accurate MailboxClosed message")
 	}
 }
 
@@ -443,21 +444,29 @@ func TestAsyncTerminateOnReceiveNext(t *testing.T) {
 
 	addr1, mailbox1 := connections.NewMailbox()
 
-	// Similar to the previous test, except simpler
-	go func() {
-		time.Sleep(5 * time.Millisecond)
-		mailbox1.Close()
-	}()
-
 	// And here, we run a Receive call that won't match the first message
 	// we send it, and assert that it gets the correct MailboxTerminated.
 	var result interface{}
 	done := make(chan struct{})
 
 	go func() {
-		result = mailbox1.Receive()
-		done <- struct{}{}
+		var (
+			ctx = context.Background()
+			err error
+		)
+
+		result, err = mailbox1.Receive(ctx)
+		if err != nil && err != ErrMailboxClosed {
+			panic(err)
+		}
+
+		close(done)
 	}()
+
+	// Make sure the above goroutine has enough time to start listening for
+	// a new message.
+	time.Sleep(500 * time.Millisecond)
+	mailbox1.Close()
 
 	<-done
 
@@ -729,7 +738,7 @@ func TestCoverNoMailbox(t *testing.T) {
 		t.Fatal("mailboxID incorrectly implemented for noMailbox")
 	}
 	nm.onCloseNotify(&Address{mailboxID: mID, mailbox: nm})
-	nm.removeNotifyAddress(&Address{mailboxID: mID, mailbox: nm})
+	nm.removeNotify(&Address{mailboxID: mID, mailbox: nm})
 
 	// FIXME: Test marshal/unmarshal
 }

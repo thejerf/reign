@@ -16,6 +16,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -94,12 +95,15 @@ func main() {
 	go func() {
 		for {
 			// As the receiver, we use the mailbox:
-			msg := mailbox.Receive()
+			msg, err := mailbox.Receive(context.Background())
+			if err != nil {
+				fmt.Println("ERROR:", err)
+			}
 
 			// If your mailbox receives multiple types, you'd normally have
 			// to do a type switch here, but in this example, there is only
 			// one type:
-			fmt.Printf("Received: %s\n", msg.(Message).Message)
+			fmt.Println("Received:", msg.(Message).Message)
 		}
 	}()
 

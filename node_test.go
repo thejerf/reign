@@ -17,6 +17,7 @@ package reign
 // * Test linking works normally
 // * Test linking works when connection terminated.
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -52,8 +53,10 @@ func TestMinimalTestBed(t *testing.T) {
 	}
 
 	// Receive the message in mailbox1 on node 1.
-	msg, ok := ntb.node1mailbox1.ReceiveTimeout(timeout)
-	if !ok {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	msg, err := ntb.node1mailbox1.Receive(ctx)
+	cancel()
+	if err != nil {
 		t.Fatalf("Did not receive %q message", m)
 	}
 	if msg.(string) != m {
@@ -64,8 +67,10 @@ func TestMinimalTestBed(t *testing.T) {
 	if err := ntb.fromNode2toNode1mailbox2.Send(m); err != nil {
 		t.Fatal(err)
 	}
-	msg, ok = ntb.node2mailbox1.ReceiveTimeout(timeout)
-	if !ok {
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	msg, err = ntb.node2mailbox1.Receive(ctx)
+	cancel()
+	if err != nil {
 		t.Fatalf("Did not receive %q message", m)
 	}
 	if msg.(string) != m {
@@ -76,8 +81,10 @@ func TestMinimalTestBed(t *testing.T) {
 	if err := ntb.fromNode2toNode1mailbox2.Send(m); err != nil {
 		t.Fatal(err)
 	}
-	msg, ok = ntb.node2mailbox1.ReceiveTimeout(timeout)
-	if !ok {
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	msg, err = ntb.node2mailbox1.Receive(ctx)
+	cancel()
+	if err != nil {
 		t.Fatalf("Did not receive %q message", m)
 	}
 	if msg.(string) != m {
@@ -88,8 +95,10 @@ func TestMinimalTestBed(t *testing.T) {
 	if err := ntb.fromNode1toNode2mailbox2.Send(m); err != nil {
 		t.Fatal(err)
 	}
-	msg, ok = ntb.node2mailbox2.ReceiveTimeout(timeout)
-	if !ok {
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	msg, err = ntb.node2mailbox2.Receive(ctx)
+	cancel()
+	if err != nil {
 		t.Fatalf("Did not receive %q message", m)
 	}
 	if msg.(string) != m {
@@ -107,8 +116,10 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 	if err := ntb.fromNode2toNode1mailbox2.Send(ntb.node1address1); err != nil {
 		t.Fatal(err)
 	}
-	sa, ok := ntb.node2mailbox1.ReceiveTimeout(timeout)
-	if !ok {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	sa, err := ntb.node2mailbox1.Receive(ctx)
+	cancel()
+	if err != nil {
 		t.Fatal("No message received")
 	}
 	sentAddr, ok := sa.(*Address)
@@ -122,8 +133,10 @@ func TestMessagesCanSendMailboxes(t *testing.T) {
 	if err := sentAddr.Send("ack"); err != nil {
 		t.Fatal(err)
 	}
-	received, ok := ntb.node1mailbox1.ReceiveTimeout(timeout)
-	if !ok {
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	received, err := ntb.node1mailbox1.Receive(ctx)
+	cancel()
+	if err != nil {
 		t.Fatal("No message received")
 	}
 	if received.(string) != "ack" {
@@ -181,13 +194,19 @@ func TestHappyPathRemoteLink(t *testing.T) {
 	// that 1_1 wants notification on termination.", which, due to
 	// how the internals work, is actually done when the Node 2
 	// remoteMailbox.Address is registered on mailbox 1_2.
-	ntb.node2address1.getAddress().(*Mailbox).blockUntilNotifyStatus(ntb.node2remoteMailboxes.Address, true)
+	ntb.node2address1.getAddress().(*Mailbox).blockUntilNotifyStatus(
+		ntb.node2remoteMailboxes.Address,
+		true,
+		500*time.Millisecond,
+	)
 
 	// now that we know the listens are all set up "correctly", let's see
 	// if we get the terminate.
 	ntb.node2mailbox1.Close()
-	termNotice, ok := ntb.node1mailbox1.ReceiveTimeout(timeout)
-	if !ok {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	termNotice, err := ntb.node1mailbox1.Receive(ctx)
+	cancel()
+	if err != nil {
 		t.Fatal("No message received")
 	}
 	if MailboxID(termNotice.(MailboxClosed)) != ntb.node2mailbox1.id {
@@ -220,7 +239,11 @@ func TestHappyPathPartialUnnotify(t *testing.T) {
 	// Add notifications on 1_1 to both mailboxes on node 1
 	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address1)
 	ntb.fromNode2toNode1mailbox2.OnCloseNotify(ntb.node1address2)
-	ntb.node2address1.getAddress().(*Mailbox).blockUntilNotifyStatus(ntb.node2remoteMailboxes.Address, true)
+	ntb.node2address1.getAddress().(*Mailbox).blockUntilNotifyStatus(
+		ntb.node2remoteMailboxes.Address,
+		true,
+		500*time.Millisecond,
+	)
 
 	// remove it from one node
 	ntb.fromNode2toNode1mailbox2.RemoveNotify(ntb.node1address1)

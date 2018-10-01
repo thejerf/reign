@@ -38,7 +38,7 @@ var directory = flag.String("dir", "", "the directory to use for the certs (defa
 
 func main() {
 	flag.Usage = func() {
-		fmt.Println(`reign_init assists with getting reign installations up and running by
+		fmt.Print(`reign_init assists with getting reign installations up and running by
 creating the initial SSL CA and certificates for use with reign.
 
 This program will create the following files:
@@ -59,6 +59,7 @@ any way. Reign will function with any certs signed by a CA that you can pass
 through the standard TLS negotation. This is only a convenience because
 it is tedious and difficult to create the certs via openssl, assuming
 the user even has openssl installed (as may not be the case on windows).
+
 `)
 		flag.PrintDefaults()
 	}

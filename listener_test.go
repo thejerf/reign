@@ -1,6 +1,7 @@
 package reign
 
 import (
+	"context"
 	"net"
 	"sync"
 	"testing"
@@ -162,6 +163,7 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 	ntb := testbed(nil, nil)
 	defer ntb.terminate()
 
+	ctx := context.Background()
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -170,7 +172,10 @@ func BenchmarkMinimalMessageSend(b *testing.B) {
 		if err != nil {
 			b.Error(err)
 		}
-		_ = ntb.node1mailbox1.Receive()
+		_, err = ntb.node1mailbox1.Receive(ctx)
+		if err != nil {
+			b.Error(err)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ package reign
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/gob"
 	"errors"
@@ -33,25 +34,27 @@ func init() {
 	gob.Register(&addr)
 }
 
-// ErrIllegalAddressFormat is returned when something attempts to
-// unmarshal an illegal text or binary string into an Address.
-var ErrIllegalAddressFormat = errors.New("illegally-formatted address")
+var (
+	// ErrIllegalAddressFormat is returned when something attempts to
+	// unmarshal an illegal text or binary string into an Address.
+	ErrIllegalAddressFormat = errors.New("illegally-formatted address")
 
-var errIllegalNilSlice = errors.New("can't unmarshal nil slice into an address")
+	// ErrIllegalNilSlice is returned when UnmarshalText is called with a nil byte slice.
+	ErrIllegalNilSlice = errors.New("cannot unmarshal nil slice into an address")
 
-// ErrMailboxClosed is returned when the target mailbox has (already) been
-// closed.
-var ErrMailboxClosed = errors.New("mailbox has been closed")
+	// ErrMailboxClosed is returned when the target mailbox has (already) been closed.
+	ErrMailboxClosed = errors.New("mailbox has been closed")
 
-// ErrNotLocalMailbox is returned when a remote mailbox's MailboxID is passed
-// into a function that only works on local mailboxes.
-var ErrNotLocalMailbox = errors.New("function required a local mailbox ID but this is a remote MailboxID")
+	// ErrNotLocalMailbox is returned when a remote mailbox's MailboxID is passed
+	// into a function that only works on local mailboxes.
+	ErrNotLocalMailbox = errors.New("function required a local mailbox ID but this is a remote MailboxID")
+)
 
 type address interface {
 	send(interface{}) error
 
 	onCloseNotify(*Address)
-	removeNotifyAddress(*Address)
+	removeNotify(*Address)
 	canBeGloballyRegistered() bool
 	canBeGloballyUnregistered() bool
 	getMailboxID() MailboxID
@@ -207,7 +210,7 @@ func (a *Address) OnCloseNotify(addr *Address) {
 // This does not guarantee that you will not receive a closed
 // notification from the Address, due to (inherent) race conditions.
 func (a *Address) RemoveNotify(addr *Address) {
-	a.getAddress().removeNotifyAddress(addr)
+	a.getAddress().removeNotify(addr)
 }
 
 // MarshalBinary implements binary marshalling for Addresses.
@@ -290,7 +293,7 @@ func (a *Address) UnmarshalText(b []byte) error {
 	}
 
 	if b == nil {
-		return errIllegalNilSlice
+		return ErrIllegalNilSlice
 	}
 
 	if len(b) == 0 {
@@ -438,18 +441,15 @@ type mailboxes struct {
 }
 
 func (m *mailboxes) newLocalMailbox() (*Address, *Mailbox) {
-	var mutex sync.Mutex
-	cond := sync.NewCond(&mutex)
-
 	nextID := MailboxID(atomic.AddUint64((*uint64)(&m.nextMailboxID), 1))
 	m.nextMailboxID++
 	id := nextID<<8 + MailboxID(m.nodeID)
 
 	mailbox := &Mailbox{
-		id:       id,
-		messages: make([]message, 0, 1),
-		cond:     cond,
-		parent:   m,
+		id:          id,
+		messages:    make([]message, 0, 1),
+		nextMessage: make(chan message, 1),
+		parent:      m,
 	}
 
 	m.registerMailbox(id, mailbox)
@@ -514,29 +514,32 @@ func newMailboxes(connectionServer *connectionServer, nodeID NodeID) *mailboxes 
 
 // A Mailbox is what you receive messages from via Receive or ReceiveNext.
 type Mailbox struct {
-	id                    MailboxID
-	messages              []message
-	cond                  *sync.Cond
-	notificationAddresses map[MailboxID]struct{}
+	id     MailboxID
+	parent *mailboxes
 
-	// used only by testing, to implement the ability to block until
-	// a notification has been processed
-	parent               *mailboxes
-	broadcastOnAddNotify bool
-	closed               bool
+	mu                    sync.Mutex
+	messages              []message
+	nextMessage           chan message
+	notificationAddresses map[MailboxID]struct{}
+	closed                bool
 }
 
 func (m *Mailbox) send(msg interface{}) error {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if m.closed {
-		return ErrMailboxClosed
+	select {
+	case prevMsg, ok := <-m.nextMessage:
+		if !ok {
+			return ErrMailboxClosed
+		}
+		m.messages = append(m.messages, message{msg})
+		m.nextMessage <- prevMsg
+	default:
+		m.messages = append(m.messages, message{msg})
+		m.nextMessage <- m.messages[0]
+		m.messages = m.messages[1:]
 	}
-
-	m.messages = append(m.messages, message{msg})
-
-	m.cond.Broadcast()
 
 	return nil
 }
@@ -554,8 +557,8 @@ func (m *Mailbox) getMailboxID() MailboxID {
 }
 
 func (m *Mailbox) onCloseNotify(target *Address) {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if m.closed {
 		_ = target.Send(MailboxClosed(m.id))
@@ -566,11 +569,8 @@ func (m *Mailbox) onCloseNotify(target *Address) {
 	if m.notificationAddresses == nil {
 		m.notificationAddresses = make(map[MailboxID]struct{})
 	}
-	m.notificationAddresses[target.mailboxID] = struct{}{}
 
-	if m.broadcastOnAddNotify {
-		m.cond.Broadcast()
-	}
+	m.notificationAddresses[target.mailboxID] = struct{}{}
 }
 
 // This test function will block until the target address is in
@@ -578,25 +578,25 @@ func (m *Mailbox) onCloseNotify(target *Address) {
 //
 // Since this is a test-only function, we only implement enough to let
 // one listen on a given address occur at a time.
-func (m *Mailbox) blockUntilNotifyStatus(target *Address, desired bool) {
-	m.cond.L.Lock()
-
-	m.broadcastOnAddNotify = true
-
+func (m *Mailbox) blockUntilNotifyStatus(target *Address, desired bool, interval time.Duration) {
 	id := target.mailboxID
 
+	m.mu.Lock()
 	_, exists := m.notificationAddresses[id]
+	m.mu.Unlock()
+
 	for exists != desired {
-		m.cond.Wait()
+		// TODO: Block here until a new message is received instead of checking on an interval.
+		time.Sleep(interval)
+		m.mu.Lock()
 		_, exists = m.notificationAddresses[id]
+		m.mu.Unlock()
 	}
-	m.broadcastOnAddNotify = false
-	m.cond.L.Unlock()
 }
 
-func (m *Mailbox) removeNotifyAddress(target *Address) {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+func (m *Mailbox) removeNotify(target *Address) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if m.notificationAddresses != nil {
 		delete(m.notificationAddresses, target.mailboxID)
@@ -605,10 +605,10 @@ func (m *Mailbox) removeNotifyAddress(target *Address) {
 
 // MessageCount returns the number of messages in the mailbox.
 //
-// 0 is always returned if the mailbox is closed.
+// 0 is always returned if the mailbox is terminated.
 func (m *Mailbox) MessageCount() int {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if !m.closed {
 		return len(m.messages)
@@ -623,72 +623,66 @@ func (m *Mailbox) MessageCount() int {
 //
 // If you've got multiple receivers on a single mailbox, be sure to check
 // for MailboxClosed.
-func (m *Mailbox) Receive() interface{} {
+func (m *Mailbox) Receive(ctx context.Context) (interface{}, error) {
 	// FIXME: Verify three listeners on one shared mailbox all get
 	// closed properly.
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
-
-	for len(m.messages) == 0 && !m.closed {
-		m.cond.Wait()
+	var (
+		ok  bool
+		msg message
+	)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case msg, ok = <-m.nextMessage:
+		if !ok {
+			return MailboxClosed(m.id), ErrMailboxClosed
+		}
 	}
 
-	if m.closed {
-		return MailboxClosed(m.id)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.messages) > 0 {
+		select {
+		case m.nextMessage <- m.messages[0]:
+			m.messages = m.messages[1:]
+		default:
+		}
 	}
 
-	msg := m.messages[0]
-	// in the common case of not having a message backlog, this
-	// should prevent a lot of garbage buildup by reusing the slot.
-	if len(m.messages) == 1 {
-		m.messages = m.messages[:0]
-	} else {
-		m.messages = m.messages[1:]
-	}
-
-	return msg.msg
+	return msg.msg, nil
 }
 
 // ReceiveAsync will return immediately with (obj, true) if, and only if,
 // there was a message in the inbox, or else (nil, false). Works the same way
-// as ReceiveNext, otherwise.
+// as Receive otherwise.
 func (m *Mailbox) ReceiveAsync() (interface{}, bool) {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	var (
+		ok  bool
+		msg message
+	)
 
-	if len(m.messages) == 0 && !m.closed {
+	select {
+	case msg, ok = <-m.nextMessage:
+		if !ok {
+			return MailboxClosed(m.id), true
+		}
+	default:
 		return nil, false
 	}
 
-	if m.closed {
-		return MailboxClosed(m.id), true
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	msg := m.messages[0]
-	// in the common case of not having a message backlog, this
-	// should prevent a lot of garbage buildup by reusing the slot.
-	if len(m.messages) == 1 {
-		m.messages = m.messages[:0]
-	} else {
-		m.messages = m.messages[1:]
-	}
-	return msg.msg, true
-}
-
-// ReceiveTimeout works like ReceiveNextAsync, but it will wait until
-// either a message is received or the timeout expires, whichever is sooner
-func (m *Mailbox) ReceiveTimeout(timeout time.Duration) (interface{}, bool) {
-	startTime := time.Now()
-	endTime := startTime.Add(timeout)
-
-	for !time.Now().After(endTime) {
-		msg, ok := m.ReceiveAsync()
-		if ok {
-			return msg, ok
+	if len(m.messages) > 0 {
+		select {
+		case m.nextMessage <- m.messages[0]:
+			m.messages = m.messages[1:]
+		default:
 		}
 	}
 
-	return nil, false
+	return msg.msg, true
 }
 
 // ReceiveMatch will receive the next message sent to this mailbox that matches
@@ -709,44 +703,69 @@ func (m *Mailbox) ReceiveTimeout(timeout time.Duration) (interface{}, bool) {
 //
 // If the mailbox gets closed, this will return a MailboxClosed,
 // regardless of the behavior of the matcher.
-func (m *Mailbox) ReceiveMatch(matcher func(interface{}) bool) interface{} {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+func (m *Mailbox) ReceiveMatch(ctx context.Context, matcher func(interface{}) bool) (interface{}, error) {
+	var (
+		ok  bool
+		msg message
+	)
 
-	if m.closed {
-		return MailboxClosed(m.id)
-	}
-
-	// see if there are any messages that match
-	for i, v := range m.messages {
-		if matcher(v.msg) {
-			m.messages = append(m.messages[:i], m.messages[i+1:]...)
-			return v.msg
-		}
-	}
-
-	// Loop until we get the message we want
-	// remember, this assumes this function is the *only* way to receive a message,
-	// so we can tell if another message came in just by looking at the
-	// length of the queue.
 	for {
-		lastIdx := len(m.messages)
-
-		for len(m.messages) == lastIdx && !m.closed {
-			m.cond.Wait()
-		}
-
-		if m.closed {
-			return MailboxClosed(m.id)
-		}
-
-		for ; lastIdx < len(m.messages); lastIdx++ {
-			if matcher(m.messages[lastIdx].msg) {
-				match := m.messages[lastIdx].msg
-				m.messages = append(m.messages[:lastIdx], m.messages[lastIdx+1:]...)
-				return match
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case msg, ok = <-m.nextMessage:
+			if !ok {
+				return MailboxClosed(m.id), ErrMailboxClosed
 			}
 		}
+
+		m.mu.Lock()
+
+		// Make sure the mailbox was not closed between reading the
+		// next message and acquiring the mutex.
+		select {
+		case prevMsg, ok := <-m.nextMessage:
+			if !ok {
+				return MailboxClosed(m.id), ErrMailboxClosed
+			}
+			// Account for any message put on the nextMessage channel
+			// between the last select and acquiring the mutex above.
+			if prevMsg.msg != nil {
+				m.messages = append([]message{prevMsg}, m.messages...)
+			}
+		default:
+		}
+
+		// Does the message we just pulled off the channel match?
+		if matcher(msg.msg) {
+			if len(m.messages) > 0 {
+				select {
+				case m.nextMessage <- m.messages[0]:
+					m.messages = m.messages[1:]
+				default:
+				}
+			}
+
+			m.mu.Unlock()
+
+			return msg.msg, nil
+		}
+
+		m.nextMessage <- msg
+
+		// No match.  Look through the messages in the queue.
+		for i := 0; i < len(m.messages); i++ {
+			if matcher(m.messages[i].msg) {
+				match := m.messages[i].msg
+				m.messages = append(m.messages[:i], m.messages[i+1:]...)
+
+				m.mu.Unlock()
+
+				return match, nil
+			}
+		}
+
+		m.mu.Unlock()
 	}
 }
 
@@ -768,18 +787,22 @@ func (m *Mailbox) Close() {
 	// out of this dict is OK.
 	m.parent.unregisterMailbox(m.id)
 
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	// this is not redundant; m.closed is part of what we have to lock
-	if m.closed {
-		return
+	select {
+	case _, ok := <-m.nextMessage:
+		if !ok {
+			return
+		}
+	default:
 	}
 
+	close(m.nextMessage)
 	m.closed = true
-
 	closing := MailboxClosed(m.id)
 	cs := m.parent.connectionServer
+
 	for mailboxID := range m.notificationAddresses {
 		addr := Address{
 			mailboxID:        mailboxID,
@@ -791,8 +814,6 @@ func (m *Mailbox) Close() {
 	// chuck out what garbage we can
 	m.notificationAddresses = nil
 	m.messages = nil
-
-	m.cond.Broadcast()
 }
 
 // This type is returned when unmarshalling a local address that doesn't
@@ -816,7 +837,7 @@ func (nm noMailbox) onCloseNotify(target *Address) {
 	_ = target.Send(MailboxClosed(nm.MailboxID))
 }
 
-func (nm noMailbox) removeNotifyAddress(target *Address) {}
+func (nm noMailbox) removeNotify(target *Address) {}
 
 func (nm noMailbox) getMailboxID() MailboxID {
 	return nm.MailboxID
@@ -863,7 +884,7 @@ func (bra boundRemoteAddress) onCloseNotify(addr *Address) {
 	)
 }
 
-func (bra boundRemoteAddress) removeNotifyAddress(addr *Address) {
+func (bra boundRemoteAddress) removeNotify(addr *Address) {
 	// as this is internal only, we can just hard-assert the local address
 	// is a "real" mailbox
 	_ = bra.remoteMailboxes.Send(

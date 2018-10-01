@@ -61,6 +61,7 @@ just goes away.
 */
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -282,8 +283,25 @@ func (r *registry) String() string {
 }
 
 func (r *registry) Serve() {
+	var (
+		ctx = context.Background()
+		l   = r.connectionServer.ClusterLogger
+	)
+
 	for {
-		message := r.Receive()
+		message, err := r.Receive(ctx)
+		if err != nil {
+			if err == ErrMailboxClosed {
+				l.Trace(err)
+
+				return
+			}
+
+			l.Errorf("Received error from registry mailbox: %#v\n", err)
+
+			continue
+		}
+
 		switch msg := message.(type) {
 		case internal.RegisterName: // Received locally
 			r.register(msg.Name, MailboxID(msg.MailboxID))
@@ -332,7 +350,7 @@ func (r *registry) Serve() {
 			// begin with rather than catching the MailboxTerminated here.
 
 		default:
-			r.connectionServer.ClusterLogger.Errorf("Unknown registry message of type %T: %#v\n", msg, message)
+			l.Errorf("Unknown registry message of type %T: %#v\n", msg, message)
 		}
 	}
 }
