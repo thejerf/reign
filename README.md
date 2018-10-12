@@ -215,6 +215,20 @@ certainly be interested in:
     so an address can't be obtained from one OS process, then that process
     dies and another starts in its place, and then someone re-uses that
     ID. Erlang has this.
+  * Under the hood, we use channels for communication. The initial design
+    did not. If a user is willing to commit to saying "the users of this
+    mailbox only ever process the messages in order, so we do not need
+    ReceiveNext", would it be possible to have what is probably a separate
+    `type` of mailbox that can safely expose a channel?
+
+    (Note it will never be possible to _send_ messages directly to a
+    channel. Go channels do not work over networks. It would be no
+    different than you starting up a goroutine on your own that accepts
+    messages and sends them somewhere. The previous paragraph proposes
+    something that should not need a new goroutine spun up by Reign. (I
+    want reign to spin up a relatively constant number of goroutines,
+    O(nodes) in the worst case. O(mailboxes) is unacceptably expensive and
+    impactful.)
   * Dynamically modifying the cluster at run time. Conceptually it's not
     too hard, "just work", but there's some i's to dot and t's to cross.
     I have some questions around the UI for this.
@@ -265,5 +279,9 @@ Release Notes
 reign uses semantic versioning. As reign has not yet hit 1.0, note that
 API changes may still occur without a major version release.
 
+* 0.9.2
+  * A somewhat experimental re-write of the internals to use channels
+    instead of Conditions under the hood. This has a few API changes, to
+    include the use of Contexts now.
 * 0.9.1
   * Initial release.
