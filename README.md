@@ -1,4 +1,4 @@
-reign 0.9.1
+reign 0.9.2
 ===========
 
 [![Build Status](https://travis-ci.org/thejerf/reign.png?branch=master)](https://travis-ci.org/thejerf/reign)
