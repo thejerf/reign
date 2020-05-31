@@ -382,7 +382,7 @@ func (nc *nodeConnection) handleIncomingMessages() {
 	nc.resetConnectionDeadline(DeadlineInterval)
 
 	// Send our registry claims.
-	var claims internal.ClusterMessage = nc.connectionServer.registry.generateAllNodeClaims()
+	var claims internal.ClusterMessage = nc.connectionServer.registry.getAllNodeClaims()
 	err = nc.output.Encode(&claims)
 	if err != nil {
 		nc.Errorf("Sending registry claims: %s", err)

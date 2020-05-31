@@ -837,7 +837,7 @@ func (nm noMailbox) onCloseNotify(target *Address) {
 	_ = target.Send(MailboxClosed(nm.MailboxID))
 }
 
-func (nm noMailbox) removeNotify(target *Address) {}
+func (nm noMailbox) removeNotify(_ *Address) {}
 
 func (nm noMailbox) getMailboxID() MailboxID {
 	return nm.MailboxID
