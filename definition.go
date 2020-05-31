@@ -198,7 +198,7 @@ func noClustering(log ClusterLogger) (*connectionServer, *registry) {
 	nodeID := NodeID(0)
 	clusterSpec := &ClusterSpec{
 		Nodes: []*NodeDefinition{
-			&NodeDefinition{
+			{
 				ID:      nodeID,
 				Address: "127.0.0.1:65530",
 			},
@@ -303,7 +303,7 @@ func createFromSpec(spec *ClusterSpec, thisNode NodeID, log ClusterLogger) (*con
 
 	log = resolveLog(log)
 
-	errs := []string{}
+	var errs []string
 
 	if spec.Nodes == nil || len(spec.Nodes) == 0 {
 		errs = append(errs, "no nodes specified in cluster definition")

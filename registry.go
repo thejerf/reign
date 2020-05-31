@@ -66,7 +66,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -79,10 +78,6 @@ func init() {
 
 	rand.Seed(time.Now().UnixNano())
 }
-
-// ErrNoAddressRegistered is returned when there are no addresses at
-// the given name.
-var ErrNoAddressRegistered = errors.New("no address is registered with that name")
 
 // ErrCantGloballyRegister is returned when you are trying to register
 // an address with the registry that can not be so registered. Only local
@@ -98,6 +93,37 @@ type MultipleClaim struct {
 	Name string
 }
 
+type reqAddNodeRegistry struct {
+	id   NodeID
+	addr Address
+}
+
+type reqAddressCount struct {
+	count chan uint
+}
+
+type reqAllNames struct {
+	names chan []string
+}
+
+type reqAllNodeClaims struct {
+	claims chan *internal.AllNodeClaims
+}
+
+type reqDumpClaims struct {
+	claims chan map[string][]MailboxID
+}
+
+type reqLookupAll struct {
+	serial string
+	addrs  chan []*Address
+}
+
+type reqSeenNames struct {
+	names []string
+	seen  chan []bool
+}
+
 type stopRegistry struct{}
 
 // synchronizeRegistry is used for registry mailbox synchronization.
@@ -109,8 +135,6 @@ type registryEntry struct {
 	name      string
 	mailboxID MailboxID
 }
-
-type registryEntries []registryEntry
 
 // Names exposes some functionality of registry
 //
@@ -166,9 +190,15 @@ type Names interface {
 
 var _ Names = (*registry)(nil)
 
-// IMPORTANT: Do not call the private (lowercase) methods of registry without
-// taking out the lock (registry.m).  Most of the functionality required can
-// be accessed through the publically-exposed (uppercase) methods.
+// IMPORTANT: Do not call the underscore methods of the registry.
+// Only the registry should call these methods to ensure it stays the
+// source of truth. All requests should go through the registry's
+// mailbox to ensure all changes and requests are atomic.
+//
+// Public (uppercase) methods are suitable for non-reign code to use
+// whereas private (lowercase) methods should only be used by reign
+// code other than the registry itself. These all send messages through
+// the registry's mailbox.
 type registry struct {
 	ClusterLogger
 
@@ -180,8 +210,6 @@ type registry struct {
 	// multipleClaimCount gauges the number of multiple claims.
 	multipleClaimCount int32
 
-	mu sync.RWMutex
-
 	// the set of all claims understood by the local node, organized as
 	// name -> set of mailbox IDs.
 	claims map[string]map[MailboxID]voidtype
@@ -189,12 +217,7 @@ type registry struct {
 	// The set of all mailboxIDs understood by the local node, organized
 	// as mailbox ID -> registryEntries, suitable for unregistering the
 	// mailbox ID from each registered name.
-	mailboxIDs map[MailboxID]registryEntries
-
-	// The node registries map gets its own mutex since the map isn't involved
-	// in other registry functions.  It's only concerned with notification to
-	// other nodes in the cluster.
-	regMu sync.RWMutex
+	mailboxIDs map[MailboxID][]registryEntry
 
 	// The map of nodes -> addresses used to communicate with those nodes.
 	// When a registration is made, this is the list of nodes that will
@@ -229,7 +252,7 @@ func newRegistry(cs *connectionServer, node NodeID, log ClusterLogger) *registry
 
 	r := &registry{
 		claims:         make(map[string]map[MailboxID]voidtype),
-		mailboxIDs:     make(map[MailboxID]registryEntries),
+		mailboxIDs:     make(map[MailboxID][]registryEntry),
 		nodeRegistries: make(map[NodeID]Address),
 		thisNode:       node,
 		ClusterLogger:  log,
@@ -243,228 +266,28 @@ func newRegistry(cs *connectionServer, node NodeID, log ClusterLogger) *registry
 	return r
 }
 
-func (r *registry) Terminate() {
-	r.Tracef("Terminating registry on node %d", r.thisNode)
-	r.Mailbox.Close()
+func (r *registry) AddressCount() uint {
+	count := make(chan uint)
+	_ = r.send(reqAddressCount{count})
+	return <-count
 }
 
-// AddNodeRegistry acceptes a node ID and an Address, and adds the Address to the
-// nodeRegistries map for the given node ID.  If the remote node's registry Address
-// is not added to this map, this node will be unable to send registry-related
-// messages to the remote node (e.g., register name, unregister name, etc.).
-func (r *registry) addNodeRegistry(n NodeID, a Address) {
-	r.regMu.Lock()
-	defer r.regMu.Unlock()
-
-	if r.nodeRegistries == nil {
-		r.nodeRegistries = make(map[NodeID]Address)
-	}
-
-	r.nodeRegistries[n] = a
-	r.Tracef("Added address %q on node %d to the node registry", a.String(), n)
+func (r *registry) AllNames() []string {
+	names := make(chan []string)
+	_ = r.send(reqAllNames{names})
+	return <-names
 }
 
-func (r *registry) connectionStatusCallback(node NodeID, connected bool) {
-	_ = r.Send(connectionStatus{node, connected})
+func (r *registry) DumpClaims() map[string][]MailboxID {
+	claims := make(chan map[string][]MailboxID)
+	_ = r.send(reqDumpClaims{claims})
+	return <-claims
 }
 
-func (r *registry) Stop() {
-	_ = r.Send(stopRegistry{})
-}
-
-func (r *registry) String() string {
-	// Since the registry's Serve() method acquires a lock receiving messages,
-	// we need to make sure that we also acquire that lock before replying to
-	// Suture's service name inquiry.
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	return fmt.Sprintf("Registry on node %d", r.thisNode)
-}
-
-func (r *registry) Serve() {
-	var (
-		ctx = context.Background()
-		l   = r.connectionServer.ClusterLogger
-	)
-
-	for {
-		message, err := r.Receive(ctx)
-		if err != nil {
-			if err == ErrMailboxClosed {
-				l.Trace(err)
-
-				return
-			}
-
-			l.Errorf("Received error from registry mailbox: %#v\n", err)
-
-			continue
-		}
-
-		switch msg := message.(type) {
-		case internal.RegisterName: // Received locally
-			r.register(msg.Name, MailboxID(msg.MailboxID))
-
-			if NodeID(msg.Node) == r.thisNode {
-				r.toOtherNodes(msg)
-			}
-
-		case *internal.RegisterName: // Received over the socket, decoded by gob
-			r.register(msg.Name, MailboxID(msg.MailboxID))
-
-		case internal.UnregisterName:
-			r.unregister(msg.Name, MailboxID(msg.MailboxID))
-
-			if NodeID(msg.Node) == r.thisNode {
-				r.toOtherNodes(msg)
-			}
-
-		case *internal.UnregisterName:
-			r.unregister(msg.Name, MailboxID(msg.MailboxID))
-
-		case internal.UnregisterMailbox: // This should only be called internally
-			r.unregisterMailbox(MailboxID(msg.MailboxID))
-
-		case connectionStatus:
-			// HERE: Handling this and the errors in mailbox.go
-			r.handleConnectionStatus(msg)
-
-		case *internal.AllNodeClaims:
-			r.handleAllNodeClaims(msg)
-
-		case internal.AllNodeClaims:
-			r.handleAllNodeClaims(&msg)
-
-		case synchronizeRegistry:
-			msg.ch <- void
-
-		case stopRegistry:
-			return
-
-		case MailboxClosed:
-			// (Adam): The only scenario I've seen thus far where we receive a
-			// MailboxTerminated is when the registry's mailbox is terminated and
-			// the UnregisterMailbox message is sent to itself.  It may be more
-			// proper to prevent the UnregisterMailbox message from going out to
-			// begin with rather than catching the MailboxTerminated here.
-
-		default:
-			l.Errorf("Unknown registry message of type %T: %#v\n", msg, message)
-		}
-	}
-}
-
-func (r *registry) Sync() {
-	synch := make(chan voidtype)
-	_ = r.send(synchronizeRegistry{synch})
-	<-synch
-}
-
-// generateAllNodeClaims returns a populated AllNodeClaims object suitable
-// for synchronizing mailbox claims with a remote node.
-func (r *registry) generateAllNodeClaims() *internal.AllNodeClaims {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	anc := internal.AllNodeClaims{
-		Node:   internal.IntNodeID(r.connectionServer.nodeID),
-		Claims: make(map[string]map[internal.IntMailboxID]struct{}),
-	}
-
-	for name, mailboxIDs := range r.claims {
-		if _, ok := anc.Claims[name]; !ok {
-			anc.Claims[name] = make(map[internal.IntMailboxID]struct{})
-		}
-
-		for intMailbox := range mailboxIDs {
-			if intMailbox.NodeID() == r.thisNode {
-				anc.Claims[name][internal.IntMailboxID(intMailbox)] = struct{}{}
-			}
-		}
-
-		if len(anc.Claims[name]) == 0 {
-			delete(anc.Claims, name)
-		}
-	}
-
-	r.Tracef("Sending the following claims: %#v", anc)
-
-	return &anc
-}
-
-func (r *registry) handleAllNodeClaims(msg *internal.AllNodeClaims) {
-	re := registryEntries{}
-
-	for name, mailboxIDs := range msg.Claims {
-		for intMailboxID := range mailboxIDs {
-			// Sanity check.
-			if intMailboxID.NodeID() != msg.Node {
-				r.Warnf("Omitting mailbox ID %x from registry sync because it's not local to node %d", intMailboxID, msg.Node)
-
-				continue
-			}
-
-			re = append(
-				re,
-				registryEntry{
-					name:      name,
-					mailboxID: MailboxID(intMailboxID),
-				},
-			)
-		}
-	}
-
-	r.registerAll(re)
-}
-
-// handleConnectionStatus deals with the connection to a node going up or
-// down.
-//
-// It turns out we don't really care when a node comes up; we expect the
-// semantics of the clustering to just carry us through until the node is
-// up. But when the connection goes down, we do need to unregister all
-// the claims on that node.
-func (r *registry) handleConnectionStatus(msg connectionStatus) {
-	r.Tracef("Handling connection status change: %#v", msg)
-
-	if msg.connected {
-		return
-	}
-
-	// Unregister all of the remote node registry entries.
-	entries := registryEntries{}
-
-	r.mu.RLock()
-	for name, mailboxIDs := range r.claims {
-		for mailboxID := range mailboxIDs {
-			if mailboxID.NodeID() == msg.node {
-				entries = append(entries, registryEntry{
-					name:      name,
-					mailboxID: mailboxID,
-				})
-			}
-		}
-	}
-	r.mu.RUnlock()
-
-	r.regMu.Lock()
-	delete(r.nodeRegistries, msg.node)
-	r.regMu.Unlock()
-
-	if len(entries) > 0 {
-		r.unregisterAll(entries)
-	}
-}
-
-func (r *registry) toOtherNodes(msg interface{}) {
-	r.regMu.RLock()
-	defer r.regMu.RUnlock()
-
-	for n, addr := range r.nodeRegistries {
-		r.Tracef("Sending message to node %d: %#v", n, msg)
-		_ = addr.Send(msg)
-	}
+func (r *registry) DumpJSON() string {
+	c := r.DumpClaims()
+	j, _ := json.Marshal(c)
+	return string(j)
 }
 
 func (r *registry) GetDebugger() NamesDebugger {
@@ -494,35 +317,12 @@ func (r *registry) Lookup(s string) (a *Address) {
 // LookupAll returns a slice of Addresses that can be used to send messages
 // to the mailboxes registered with the given string.
 func (r *registry) LookupAll(s string) []*Address {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var a []*Address
-
-	claims, ok := r.claims[s]
-	if !ok {
-		return a
-	}
-
-	if len(claims) > 0 {
-		cs := r.connectionServer
-
-		for k := range claims {
-			a = append(a, &Address{
-				mailboxID:        k,
-				connectionServer: cs,
-				mailbox:          nil,
-			})
-		}
-	}
-
-	return a
+	addrs := make(chan []*Address)
+	_ = r.send(reqLookupAll{s, addrs})
+	return <-addrs
 }
 
 func (r *registry) MultipleClaimCount() int32 {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	return atomic.LoadInt32(&r.multipleClaimCount)
 }
 
@@ -546,6 +346,127 @@ func (r *registry) Register(name string, addr *Address) error {
 		Name:      name,
 		MailboxID: internal.IntMailboxID(addr.mailboxID),
 	})
+}
+
+// SeenNames returns an array where each element corresponds to whether the inputted name
+// at that index was found in the registry or not
+func (r *registry) SeenNames(names ...string) []bool {
+	seen := make(chan []bool)
+	_ = r.send(reqSeenNames{names, seen})
+	return <-seen
+}
+
+func (r *registry) Serve() {
+	var (
+		ctx = context.Background()
+		l   = r.connectionServer.ClusterLogger
+	)
+
+	for {
+		message, err := r.Receive(ctx)
+		if err != nil {
+			if err == ErrMailboxClosed {
+				l.Trace(err)
+
+				return
+			}
+
+			l.Errorf("Received error from registry mailbox: %#v\n", err)
+
+			continue
+		}
+
+		switch msg := message.(type) {
+		case internal.RegisterName: // Received locally
+			r._register(msg.Name, MailboxID(msg.MailboxID))
+
+			if NodeID(msg.Node) == r.thisNode {
+				r._toOtherNodes(msg)
+			}
+
+		case *internal.RegisterName: // Received over the socket, decoded by gob
+			r._register(msg.Name, MailboxID(msg.MailboxID))
+
+		case internal.UnregisterName:
+			r._unregister(msg.Name, MailboxID(msg.MailboxID))
+
+			if NodeID(msg.Node) == r.thisNode {
+				r._toOtherNodes(msg)
+			}
+
+		case *internal.UnregisterName:
+			r._unregister(msg.Name, MailboxID(msg.MailboxID))
+
+		case internal.UnregisterMailbox: // This should only be called internally
+			r._unregisterMailbox(MailboxID(msg.MailboxID))
+
+		case connectionStatus:
+			// HERE: Handling this and the errors in mailbox.go
+			r._handleConnectionStatus(msg)
+
+		case *internal.AllNodeClaims:
+			r._handleAllNodeClaims(msg)
+
+		case internal.AllNodeClaims:
+			r._handleAllNodeClaims(&msg)
+
+		case reqAddNodeRegistry:
+			r._addNodeRegistry(msg)
+
+		case reqAddressCount:
+			r._addressCount(msg)
+
+		case reqAllNames:
+			r._allNames(msg)
+
+		case reqAllNodeClaims:
+			r._generateAllNodeClaims(msg)
+
+		case reqDumpClaims:
+			r._dumpClaims(msg)
+
+		case reqLookupAll:
+			r._lookupAll(msg)
+
+		case reqSeenNames:
+			r._seenNames(msg)
+
+		case synchronizeRegistry:
+			msg.ch <- void
+
+		case stopRegistry:
+			return
+
+		case MailboxClosed:
+			// (Adam): The only scenario I've seen thus far where we receive a
+			// MailboxTerminated is when the registry's mailbox is terminated and
+			// the UnregisterMailbox message is sent to itself.  It may be more
+			// proper to prevent the UnregisterMailbox message from going out to
+			// begin with rather than catching the MailboxTerminated here.
+
+		default:
+			l.Errorf("Unknown registry message of type %T: %#v\n", msg, message)
+		}
+	}
+}
+
+func (r *registry) Stop() {
+	_ = r.Send(stopRegistry{})
+}
+
+func (r *registry) String() string {
+	return fmt.Sprintf("Registry on node %d", r.thisNode)
+}
+
+func (r *registry) Sync() {
+	synch := make(chan voidtype)
+	_ = r.send(synchronizeRegistry{synch})
+	<-synch
+}
+
+func (r *registry) Terminate() {
+	r.Tracef("Terminating registry on node %d", r.thisNode)
+	r.Mailbox.Close()
 }
 
 // Unregister removes the given claim from a given global name.
@@ -584,11 +505,182 @@ func (r *registry) UnregisterMailbox(node NodeID, mID MailboxID) {
 	}
 }
 
+// addNodeRegistry accepts a node ID and an Address, and adds the Address to the
+// nodeRegistries map for the given node ID.  If the remote node's registry Address
+// is not added to this map, this node will be unable to send registry-related
+// messages to the remote node (e.g., register name, unregister name, etc.).
+func (r *registry) addNodeRegistry(n NodeID, a Address) {
+	_ = r.send(reqAddNodeRegistry{n, a})
+}
+
+func (r *registry) connectionStatusCallback(node NodeID, connected bool) {
+	_ = r.Send(connectionStatus{node, connected})
+}
+
+// getAllNodeClaims returns a populated AllNodeClaims object suitable
+// for synchronizing mailbox claims with a remote node.
+func (r *registry) getAllNodeClaims() *internal.AllNodeClaims {
+	claims := make(chan *internal.AllNodeClaims)
+	_ = r.send(reqAllNodeClaims{claims})
+	return <-claims
+}
+
+func (r *registry) _addNodeRegistry(req reqAddNodeRegistry) {
+	r.nodeRegistries[req.id] = req.addr
+	r.Tracef("Added address %q on node %d to the node registry",
+		req.addr.String(), req.id)
+}
+
+func (r *registry) _addressCount(req reqAddressCount) {
+	var count uint
+
+	for _, addresses := range r.claims {
+		count += uint(len(addresses))
+	}
+
+	req.count <- count
+}
+
+func (r *registry) _allNames(req reqAllNames) {
+	names := make([]string, 0, len(r.claims))
+	for name := range r.claims {
+		names = append(names, name)
+	}
+	req.names <- names
+}
+
+func (r *registry) _dumpClaims(req reqDumpClaims) {
+	c := make(map[string][]MailboxID, len(r.claims))
+	for name := range r.claims {
+		addrs := make([]MailboxID, 0, len(r.claims[name]))
+		for addr := range r.claims[name] {
+			addrs = append(addrs, addr)
+		}
+		c[name] = addrs
+	}
+
+	req.claims <- c
+}
+
+func (r *registry) _generateAllNodeClaims(call reqAllNodeClaims) {
+	anc := internal.AllNodeClaims{
+		Node:   internal.IntNodeID(r.connectionServer.nodeID),
+		Claims: make(map[string]map[internal.IntMailboxID]struct{}),
+	}
+
+	for name, mailboxIDs := range r.claims {
+		if _, ok := anc.Claims[name]; !ok {
+			anc.Claims[name] = make(map[internal.IntMailboxID]struct{})
+		}
+
+		for intMailbox := range mailboxIDs {
+			if intMailbox.NodeID() == r.thisNode {
+				anc.Claims[name][internal.IntMailboxID(intMailbox)] = struct{}{}
+			}
+		}
+
+		if len(anc.Claims[name]) == 0 {
+			delete(anc.Claims, name)
+		}
+	}
+
+	r.Tracef("Sending the following claims: %#v", anc)
+
+	call.claims <- &anc
+}
+
+func (r *registry) _handleAllNodeClaims(msg *internal.AllNodeClaims) {
+	re := make([]registryEntry, 0, len(msg.Claims))
+
+	for name, mailboxIDs := range msg.Claims {
+		for intMailboxID := range mailboxIDs {
+			// Sanity check.
+			if intMailboxID.NodeID() != msg.Node {
+				r.Warnf("Omitting mailbox ID %x from registry sync because it's not local to node %d", intMailboxID, msg.Node)
+
+				continue
+			}
+
+			re = append(
+				re,
+				registryEntry{
+					name:      name,
+					mailboxID: MailboxID(intMailboxID),
+				},
+			)
+		}
+	}
+
+	r._registerAll(re)
+}
+
+// handleConnectionStatus deals with the connection to a node going up or
+// down.
+//
+// It turns out we don't really care when a node comes up; we expect the
+// semantics of the clustering to just carry us through until the node is
+// up. But when the connection goes down, we do need to unregister all
+// the claims on that node.
+func (r *registry) _handleConnectionStatus(msg connectionStatus) {
+	r.Tracef("Handling connection status change: %#v", msg)
+
+	if msg.connected {
+		return
+	}
+
+	// Unregister all of the remote node registry entries.
+	entries := make([]registryEntry, 0, len(r.claims))
+
+	for name, mailboxIDs := range r.claims {
+		for mailboxID := range mailboxIDs {
+			if mailboxID.NodeID() == msg.node {
+				entries = append(entries, registryEntry{
+					name:      name,
+					mailboxID: mailboxID,
+				})
+			}
+		}
+	}
+
+	delete(r.nodeRegistries, msg.node)
+
+	if len(entries) > 0 {
+		r._unregisterAll(entries)
+	}
+}
+
+func (r *registry) _toOtherNodes(msg interface{}) {
+	for n, addr := range r.nodeRegistries {
+		r.Tracef("Sending message to node %d: %#v", n, msg)
+		_ = addr.Send(msg)
+	}
+}
+func (r *registry) _lookupAll(req reqLookupAll) {
+	var a []*Address
+
+	claims, ok := r.claims[req.serial]
+	if ok {
+		if len(claims) > 0 {
+			cs := r.connectionServer
+
+			for k := range claims {
+				a = append(a, &Address{
+					mailboxID:        k,
+					connectionServer: cs,
+					mailbox:          nil,
+				})
+			}
+		}
+	}
+
+	req.addrs <- a
+}
+
 // register is the internal registration function.
-func (r *registry) register(name string, mID MailboxID) {
-	r.registerAll(
-		registryEntries{
-			registryEntry{
+func (r *registry) _register(name string, mID MailboxID) {
+	r._registerAll(
+		[]registryEntry{
+			{
 				name:      name,
 				mailboxID: mID,
 			},
@@ -596,8 +688,8 @@ func (r *registry) register(name string, mID MailboxID) {
 	)
 }
 
-// registerAll atomically registers registry entries.
-func (r *registry) registerAll(entries registryEntries) {
+// _registerAll registers registry entries.
+func (r *registry) _registerAll(entries []registryEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -650,14 +742,23 @@ func (r *registry) registerAll(entries registryEntries) {
 	}
 }
 
+func (r *registry) _seenNames(req reqSeenNames) {
+	seen := make([]bool, 0, len(req.names))
+	for _, name := range req.names {
+		_, ok := r.claims[name]
+		seen = append(seen, ok)
+	}
+	req.seen <- seen
+}
+
 // unregister is the internal unregistration function. In the event that
 // this results in the last registry for a given name being removed, we
 // check for anyone currently waiting for a termination notice on that
 // name and send it.
-func (r *registry) unregister(name string, mID MailboxID) {
-	r.unregisterAll(
-		registryEntries{
-			registryEntry{
+func (r *registry) _unregister(name string, mID MailboxID) {
+	r._unregisterAll(
+		[]registryEntry{
+			{
 				name:      name,
 				mailboxID: mID,
 			},
@@ -665,11 +766,8 @@ func (r *registry) unregister(name string, mID MailboxID) {
 	)
 }
 
-// unregisterAll atomically unregisters registry entries.
-func (r *registry) unregisterAll(entries registryEntries) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+// _unregisterAll unregisters registry entries.
+func (r *registry) _unregisterAll(entries []registryEntry) {
 	for _, e := range entries {
 		mailboxIDs, ok := r.claims[e.name]
 		if !ok {
@@ -692,87 +790,23 @@ func (r *registry) unregisterAll(entries registryEntries) {
 }
 
 // unregisterMailbox unregisters all names associated with the given mailbox ID
-func (r *registry) unregisterMailbox(mID MailboxID) {
-	r.mu.Lock()
+func (r *registry) _unregisterMailbox(mID MailboxID) {
 	entries, ok := r.mailboxIDs[mID]
 	if ok {
 		delete(r.mailboxIDs, mID)
 	}
-	r.mu.Unlock()
 
 	if len(entries) > 0 {
 		// Remove the entries from this node.
-		r.unregisterAll(entries)
+		r._unregisterAll(entries)
 
 		// Broadcast out the unregistrations to the other nodes.
 		for _, entry := range entries {
-			r.toOtherNodes(internal.UnregisterName{
+			r._toOtherNodes(internal.UnregisterName{
 				Node:      internal.IntNodeID(r.thisNode),
 				Name:      entry.name,
 				MailboxID: internal.IntMailboxID(entry.mailboxID),
 			})
 		}
 	}
-}
-
-// RegistryDebugger methods
-
-func (r *registry) DumpClaims() map[string][]MailboxID {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	copy := make(map[string][]MailboxID, len(r.claims))
-	for name := range r.claims {
-		addrs := make([]MailboxID, 0, len(r.claims[name]))
-		for addr := range r.claims[name] {
-			addrs = append(addrs, addr)
-		}
-		copy[name] = addrs
-	}
-
-	return copy
-}
-
-func (r *registry) DumpJSON() string {
-	copy := r.DumpClaims()
-	j, _ := json.Marshal(copy)
-	return string(j)
-}
-
-func (r *registry) AddressCount() uint {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var count uint
-
-	for _, addresses := range r.claims {
-		count += uint(len(addresses))
-	}
-
-	return count
-}
-
-func (r *registry) AllNames() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	names := make([]string, 0, len(r.claims))
-	for name := range r.claims {
-		names = append(names, name)
-	}
-	return names
-}
-
-// SeenNames returns an array where each element corresponds to whether the inputted name
-// at that index was found in the registry or not
-func (r *registry) SeenNames(names ...string) []bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	seen := make([]bool, 0, len(names))
-	for _, name := range names {
-		_, ok := r.claims[name]
-		seen = append(seen, ok)
-	}
-	return seen
 }

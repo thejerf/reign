@@ -265,15 +265,15 @@ func (ic *incomingConnection) sslHandshake() error {
 	}
 	tlsConfig := ic.nodeListener.connectionServer.Cluster.tlsConfig(ic.server.ID)
 
-	tls := tls.Server(ic.conn, tlsConfig)
+	tlsSrv := tls.Server(ic.conn, tlsConfig)
 	ic.Tracef("Node %d listener made the tlsConn, handshaking", ic.server.ID)
 
-	err := tls.Handshake()
+	err := tlsSrv.Handshake()
 	if err != nil {
 		return err
 	}
 
-	ic.tls = tls
+	ic.tls = tlsSrv
 	ic.output = gob.NewEncoder(ic.tls)
 	ic.input = gob.NewDecoder(ic.tls)
 
@@ -387,7 +387,7 @@ func (ic *incomingConnection) handleIncomingMessages() {
 	ic.resetConnectionDeadline(DeadlineInterval)
 
 	// Send our registry claims.
-	var claims internal.ClusterMessage = ic.connectionServer.registry.generateAllNodeClaims()
+	var claims internal.ClusterMessage = ic.connectionServer.registry.getAllNodeClaims()
 	err = ic.output.Encode(&claims)
 	if err != nil {
 		ic.Errorf("Sending registry claims: %s", err)
